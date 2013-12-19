@@ -1772,31 +1772,7 @@ class rcube_pop extends rcube_storage
         rcube::write_log('errors', $message);
     }
 
-    private function _message_header($msg_id) {
-        $raw = $this->conn->getParsedHeaders($msg_id);
-        $h = new rcube_message_header();
-        $h->id = $msg_id;
-        // TODO use uidl (but a uidl is not number)
-        $h->uid = $msg_id;
-        $h->subject = $raw['Subject'];
-        $h->messageID = $raw['Message-ID'];
-        $h->from = $raw['From'];
-        $h->to = $raw['To'];
-        $h->date = $raw['Date'];
-        $h->timestamp = rcube_imap_generic::strToTime($raw['Date']);
-
-        return $h;
-    }
-
-    private function _mime_message($msg_id) {
-        // TODO check message size
-
-        $this->log('MESSAGE_HEADER: %s', $msg_id);
-        $raw_msg = $this->conn->getMsg($msg_id);
-
-        $struct = rcube_mime::parse_message($raw_msg);
-        $headers = $struct->headers;
-
+    private function _headers_to_msg($msg_id, $headers) {
         $msg = new rcube_message_header();
         $msg->id = $msg_id;
         // TODO use uidl (but a uidl is not number)
@@ -1807,7 +1783,23 @@ class rcube_pop extends rcube_storage
         $msg->to = $headers['to'];
         $msg->date = $headers['date'];
         $msg->timestamp = rcube_imap_generic::strToTime($headers['date']);
+        return $msg;
+    }
 
+    private function _message_header($msg_id) {
+        $raw = $this->conn->getRawHeaders($msg_id);
+        $struct = rcube_mime::parse_message($raw);
+        return $this->_headers_to_msg($msg_id, $struct->headers);
+    }
+
+    private function _mime_message($msg_id) {
+        // TODO check message size
+
+        $this->log(sprintf('MIME_MESSAGE: %s', $msg_id));
+        $raw_msg = $this->conn->getMsg($msg_id);
+
+        $struct = rcube_mime::parse_message($raw_msg);
+        $msg = $this->_headers_to_msg($msg_id, $struct->headers);
         $ctype_params = array();
         $msg->bodystructure = array(
             $struct->ctype_primary,
