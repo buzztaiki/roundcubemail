@@ -737,10 +737,6 @@ class rcube_pop extends rcube_storage
      */
     public function get_message($uid, $folder = null)
     {
-        if (!strlen($folder)) {
-            $folder = $this->folder;
-        }
-
         // Check internal cache
         if (!empty($this->icache['message'])) {
             if (($headers = $this->icache['message']) && $headers->uid == $uid) {
@@ -776,9 +772,9 @@ class rcube_pop extends rcube_storage
             return null;
         }
 
+        $this->log('DO GET_MESSAGE_PART');
         // get part data if not provided
         if (!is_object($o_part)) {
-            $this->log('DO GET_MESSAGE_PART');
             return null;
 
             $structure = $this->conn->getStructure($this->folder, $uid, true);
@@ -840,8 +836,8 @@ class rcube_pop extends rcube_storage
             return null;
         }
 
-        return $this->conn->handlePartBody($this->folder, $uid,
-            true, null, null, false, $fp);
+        // TODO uid
+        return $this->conn->getMsg($uid);
     }
 
 
@@ -858,7 +854,8 @@ class rcube_pop extends rcube_storage
             return null;
         }
 
-        return $this->conn->fetchPartHeader($this->folder, $uid, true);
+        // TODO uid
+        return $this->conn->getRawHeaders($uid);
     }
 
 
@@ -874,7 +871,8 @@ class rcube_pop extends rcube_storage
             return;
         }
 
-        $this->conn->handlePartBody($this->folder, $uid, true, null, null, true, null, $formatted);
+        // TODO uid
+        print $this->conn->getMsg($uid);
     }
 
 
