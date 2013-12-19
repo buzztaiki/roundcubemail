@@ -751,7 +751,7 @@ class rcube_pop extends rcube_storage
         if (!$this->check_connection()) {
             return null;
         }
-        return $this->_mime_message($uid);
+        return $this->_message($uid);
     }
 
     /**
@@ -1792,7 +1792,7 @@ class rcube_pop extends rcube_storage
         return $this->_headers_to_msg($msg_id, $struct->headers);
     }
 
-    private function _mime_message($msg_id) {
+    private function _message($msg_id) {
         // TODO check message size
 
         $this->log(sprintf('MIME_MESSAGE: %s', $msg_id));
@@ -1800,6 +1800,15 @@ class rcube_pop extends rcube_storage
 
         $struct = rcube_mime::parse_message($raw_msg);
         $msg = $this->_headers_to_msg($msg_id, $struct->headers);
+
+        $struct->mimetype = strtolower($struct->mimetype);
+        $struct->ctype_primary = strtolower($struct->ctype_primary);
+        $struct->ctype_secondary = strtolower($struct->ctype_secondary);
+        if (empty($struct->parts)) {
+            $struct->mime_id  = '1';
+            $struct->body = rcube_charset::convert($struct->body, $struct->charset);
+        }
+
         $ctype_params = array();
         $msg->bodystructure = array(
             $struct->ctype_primary,
