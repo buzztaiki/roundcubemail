@@ -108,6 +108,7 @@ class rcube_pop extends rcube_storage
      */
     public function connect($host, $user, $pass, $port=110, $use_ssl=null)
     {
+        $this->log('DO CONNECT');
         if ($use_ssl) {
             rcube::raise_error(array('code' => 403, 'type' => 'pop',
                 'file' => __FILE__, 'line' => __LINE__,
@@ -140,17 +141,19 @@ class rcube_pop extends rcube_storage
                 $pass = $data['pass'];
             }
 
-            $this->connected = $this->conn->connect($data['host'], $data['port']);
+            $connected = $this->conn->connect($data['host'], $data['port']);
 
-            if ($this->connected) {
-                $this->connected = $this->conn->login($data['user'], $pass, 'USER');
-                if (!$this->connected) {
+            if ($connected) {
+                $res = $this->conn->login($data['user'], $pass, 'USER');
+                if (PEAR::isError($res)) {
+                    $this->log(sprintf('could not login: %s', $res));
                     $this->conn->disconnect();
+                    $this->connected = false;
+                    return false;
                 }
             }
-        } while(!$this->connected && $data['retry']);
+        } while(!$connected && $data['retry']);
 
-        $this->log(sprintf('connected: %s', $this->connected));
         $config = array(
             'host'     => $data['host'],
             'user'     => $data['user'],
@@ -160,6 +163,7 @@ class rcube_pop extends rcube_storage
         );
 
         $this->options      = array_merge($this->options, $config);
+        $this->connected = $connected;
         $this->connect_done = true;
 
         if ($this->connected) {
@@ -187,7 +191,9 @@ class rcube_pop extends rcube_storage
      */
     public function close()
     {
+        $this->log('DO CLOSE');
         $this->conn->disconnect();
+        $this->connected = false;
         if ($this->mcache) {
             $this->mcache->close();
         }
@@ -201,6 +207,10 @@ class rcube_pop extends rcube_storage
      */
     public function check_connection()
     {
+        $this->log(sprintf('DO CHECK_CONNECTION: %s, %s, %s',
+        $this->connected,
+        $this->connect_done, $this->options['user']));
+
         // Establish connection if it wasn't done yet
         if (!$this->connect_done && !empty($this->options['user'])) {
             return $this->connect(
@@ -223,7 +233,7 @@ class rcube_pop extends rcube_storage
      */
     public function is_connected()
     {
-        $this->log(sprintf('is_connected: %s', $this->connected));
+        $this->log(sprintf('DO IS_CONNECTED: %s', $this->connected));
         return $this->connected;
     }
 
@@ -259,26 +269,8 @@ class rcube_pop extends rcube_storage
      */
     public function get_response_code()
     {
-        switch ($this->conn->resultcode) {
-            case 'NOPERM':
-                return self::NOPERM;
-            case 'READ-ONLY':
-                return self::READONLY;
-            case 'TRYCREATE':
-                return self::TRYCREATE;
-            case 'INUSE':
-                return self::INUSE;
-            case 'OVERQUOTA':
-                return self::OVERQUOTA;
-            case 'ALREADYEXISTS':
-                return self::ALREADYEXISTS;
-            case 'NONEXISTENT':
-                return self::NONEXISTENT;
-            case 'CONTACTADMIN':
-                return self::CONTACTADMIN;
-            default:
-                return self::UNKNOWN;
-        }
+        // TODO
+        return self::UNKNOWN;
     }
 
 
@@ -372,11 +364,7 @@ class rcube_pop extends rcube_storage
      */
     public function check_permflag($flag)
     {
-        $flag       = strtoupper($flag);
-        $perm_flags = $this->get_permflags($this->folder);
-        $imap_flag  = $this->conn->flags[$flag];
-
-        return $imap_flag && !empty($perm_flags) && in_array_nocase($imap_flag, $perm_flags);
+        return false;
     }
 
 
@@ -389,26 +377,7 @@ class rcube_pop extends rcube_storage
      */
     public function get_permflags($folder)
     {
-        if (!strlen($folder)) {
-            return array();
-        }
-
-        if (!$this->check_connection()) {
-            return array();
-        }
-
-        if ($this->conn->select($folder)) {
-            $permflags = $this->conn->data['PERMANENTFLAGS'];
-        }
-        else {
-            return array();
-        }
-
-        if (!is_array($permflags)) {
-            $permflags = array();
-        }
-
-        return $permflags;
+        return array();
     }
 
 
@@ -502,6 +471,10 @@ class rcube_pop extends rcube_storage
      */
     protected function countmessages($folder, $mode='ALL', $force=false, $status=true)
     {
+        if (!$this->check_connection()) {
+            return 0;
+        }
+
         return $this->conn->numMsg();
     }
 
@@ -641,13 +614,7 @@ class rcube_pop extends rcube_storage
      */
     function threads_direct($folder)
     {
-        if (!$this->check_connection()) {
-            return new rcube_result_thread();
-        }
-
-        // get all threads
-        return $this->conn->thread($folder, $this->threading,
-            $this->options['skip_deleted'] ? 'UNDELETED' : '', true);
+        return new rcube_result_thread();
     }
 
 
@@ -895,19 +862,7 @@ class rcube_pop extends rcube_storage
         else {
             // TODO get_fetch_headers support
             $headers = array_map(function($id) {
-                $raw = $this->conn->getParsedHeaders($id);
-                $h = new rcube_message_header();
-                $h->id = $id;
-                // TODO use uidl (but a number)
-                $h->uid = $id;
-                $h->subject = $raw['Subject'];
-                $h->messageID = $raw['Message-ID'];
-                $h->from = $raw['From'];
-                $h->to = $raw['To'];
-                $h->date = $raw['Date'];
-                $h->timestamp = rcube_imap_generic::strToTime($raw['Date']);
-                
-                return $h;
+                return $this->_message_header($id);
             }, $msgs);
         }
 
@@ -1041,14 +996,17 @@ class rcube_pop extends rcube_storage
      */
     public function index_direct($folder, $sort_field = null, $sort_order = null, $search = null)
     {
+        if (!$this->check_connection()) {
+            return new rcube_result_index();
+        }
+
         // TODO sort
         $msg_ids = array_map(function($x) {
             return $x['msg_id'];
         }, $this->conn->getListing());
+
         $data = sprintf("* SEARCH %s", implode(rcube_result_index::SEPARATOR_ELEMENT, $msg_ids));
-        $this->log(sprintf("data: %s", $data));
         $index = new rcube_result_index($folder, $data);
-        $this->log(sprintf("index: %d, %d, %s", $index->count(), $index->count_messages(), $index->get()));
 
         return $index;
     }
@@ -1115,17 +1073,12 @@ class rcube_pop extends rcube_storage
 
         // get cached headers
         if (!$force && $uid && ($mcache = $this->get_mcache_engine())) {
-            $headers = $mcache->get_message($folder, $uid);
+            return $mcache->get_message($folder, $uid);
         }
-        else if (!$this->check_connection()) {
-            $headers = false;
+        if (!$this->check_connection()) {
+            return null;
         }
-        else {
-            $headers = $this->conn->fetchHeader(
-                $folder, $uid, true, true, $this->get_fetch_headers());
-        }
-
-        return $headers;
+        return $this->_message_header($uid);
     }
 
 
@@ -1151,473 +1104,11 @@ class rcube_pop extends rcube_storage
             }
         }
 
-        $headers = $this->get_message_headers($uid, $folder);
-
-        // message doesn't exist?
-        if (empty($headers)) {
+        if (!$this->check_connection()) {
             return null;
         }
-
-        // structure might be cached
-        if (!empty($headers->structure)) {
-            return $headers;
-        }
-
-        $this->msg_uid = $uid;
-
-        if (!$this->check_connection()) {
-            return $headers;
-        }
-
-        if (empty($headers->bodystructure)) {
-            $headers->bodystructure = $this->conn->getStructure($folder, $uid, true);
-        }
-
-        $structure = $headers->bodystructure;
-
-        if (empty($structure)) {
-            return $headers;
-        }
-
-        // set message charset from message headers
-        if ($headers->charset) {
-            $this->struct_charset = $headers->charset;
-        }
-        else {
-            $this->struct_charset = $this->structure_charset($structure);
-        }
-
-        $headers->ctype = strtolower($headers->ctype);
-
-        // Here we can recognize malformed BODYSTRUCTURE and
-        // 1. [@TODO] parse the message in other way to create our own message structure
-        // 2. or just show the raw message body.
-        // Example of structure for malformed MIME message:
-        // ("text" "plain" NIL NIL NIL "7bit" 2154 70 NIL NIL NIL)
-        if ($headers->ctype && !is_array($structure[0]) && $headers->ctype != 'text/plain'
-            && strtolower($structure[0].'/'.$structure[1]) == 'text/plain'
-        ) {
-            // A special known case "Content-type: text" (#1488968)
-            if ($headers->ctype == 'text') {
-                $structure[1]   = 'plain';
-                $headers->ctype = 'text/plain';
-            }
-            // we can handle single-part messages, by simple fix in structure (#1486898)
-            else if (preg_match('/^(text|application)\/(.*)/', $headers->ctype, $m)) {
-                $structure[0] = $m[1];
-                $structure[1] = $m[2];
-            }
-            else {
-                // Try to parse the message using Mail_mimeDecode package
-                // We need a better solution, Mail_mimeDecode parses message
-                // in memory, which wouldn't work for very big messages,
-                // (it uses up to 10x more memory than the message size)
-                // it's also buggy and not actively developed
-                if ($headers->size && rcube_utils::mem_check($headers->size * 10)) {
-                    $raw_msg = $this->get_raw_body($uid);
-                    $struct = rcube_mime::parse_message($raw_msg);
-                }
-                else {
-                    return $headers;
-                }
-            }
-        }
-
-        if (empty($struct)) {
-            $struct = $this->structure_part($structure, 0, '', $headers);
-        }
-
-        // some workarounds on simple messages...
-        if (empty($struct->parts)) {
-            // ...don't trust given content-type
-            if (!empty($headers->ctype)) {
-                $struct->mime_id  = '1';
-                $struct->mimetype = strtolower($headers->ctype);
-                list($struct->ctype_primary, $struct->ctype_secondary) = explode('/', $struct->mimetype);
-            }
-
-            // ...and charset (there's a case described in #1488968 where invalid content-type
-            // results in invalid charset in BODYSTRUCTURE)
-            if (!empty($headers->charset) && $headers->charset != $struct->ctype_parameters['charset']) {
-                $struct->charset                     = $headers->charset;
-                $struct->ctype_parameters['charset'] = $headers->charset;
-            }
-        }
-
-        $headers->structure = $struct;
-
-        return $this->icache['message'] = $headers;
+        return $this->_mime_message($uid);
     }
-
-
-    /**
-     * Build message part object
-     *
-     * @param array  $part
-     * @param int    $count
-     * @param string $parent
-     */
-    protected function structure_part($part, $count=0, $parent='', $mime_headers=null)
-    {
-        $struct = new rcube_message_part;
-        $struct->mime_id = empty($parent) ? (string)$count : "$parent.$count";
-
-        // multipart
-        if (is_array($part[0])) {
-            $struct->ctype_primary = 'multipart';
-
-        /* RFC3501: BODYSTRUCTURE fields of multipart part
-            part1 array
-            part2 array
-            part3 array
-            ....
-            1. subtype
-            2. parameters (optional)
-            3. description (optional)
-            4. language (optional)
-            5. location (optional)
-        */
-
-            // find first non-array entry
-            for ($i=1; $i<count($part); $i++) {
-                if (!is_array($part[$i])) {
-                    $struct->ctype_secondary = strtolower($part[$i]);
-                    break;
-                }
-            }
-
-            $struct->mimetype = 'multipart/'.$struct->ctype_secondary;
-
-            // build parts list for headers pre-fetching
-            for ($i=0; $i<count($part); $i++) {
-                if (!is_array($part[$i])) {
-                    break;
-                }
-                // fetch message headers if message/rfc822
-                // or named part (could contain Content-Location header)
-                if (!is_array($part[$i][0])) {
-                    $tmp_part_id = $struct->mime_id ? $struct->mime_id.'.'.($i+1) : $i+1;
-                    if (strtolower($part[$i][0]) == 'message' && strtolower($part[$i][1]) == 'rfc822') {
-                        $mime_part_headers[] = $tmp_part_id;
-                    }
-                    else if (in_array('name', (array)$part[$i][2]) && empty($part[$i][3])) {
-                        $mime_part_headers[] = $tmp_part_id;
-                    }
-                }
-            }
-
-            // pre-fetch headers of all parts (in one command for better performance)
-            // @TODO: we could do this before _structure_part() call, to fetch
-            // headers for parts on all levels
-            if ($mime_part_headers) {
-                $mime_part_headers = $this->conn->fetchMIMEHeaders($this->folder,
-                    $this->msg_uid, $mime_part_headers);
-            }
-
-            $struct->parts = array();
-            for ($i=0, $count=0; $i<count($part); $i++) {
-                if (!is_array($part[$i])) {
-                    break;
-                }
-                $tmp_part_id = $struct->mime_id ? $struct->mime_id.'.'.($i+1) : $i+1;
-                $struct->parts[] = $this->structure_part($part[$i], ++$count, $struct->mime_id,
-                    $mime_part_headers[$tmp_part_id]);
-            }
-
-            return $struct;
-        }
-
-        /* RFC3501: BODYSTRUCTURE fields of non-multipart part
-            0. type
-            1. subtype
-            2. parameters
-            3. id
-            4. description
-            5. encoding
-            6. size
-          -- text
-            7. lines
-          -- message/rfc822
-            7. envelope structure
-            8. body structure
-            9. lines
-          --
-            x. md5 (optional)
-            x. disposition (optional)
-            x. language (optional)
-            x. location (optional)
-        */
-
-        // regular part
-        $struct->ctype_primary = strtolower($part[0]);
-        $struct->ctype_secondary = strtolower($part[1]);
-        $struct->mimetype = $struct->ctype_primary.'/'.$struct->ctype_secondary;
-
-        // read content type parameters
-        if (is_array($part[2])) {
-            $struct->ctype_parameters = array();
-            for ($i=0; $i<count($part[2]); $i+=2) {
-                $struct->ctype_parameters[strtolower($part[2][$i])] = $part[2][$i+1];
-            }
-
-            if (isset($struct->ctype_parameters['charset'])) {
-                $struct->charset = $struct->ctype_parameters['charset'];
-            }
-        }
-
-        // #1487700: workaround for lack of charset in malformed structure
-        if (empty($struct->charset) && !empty($mime_headers) && $mime_headers->charset) {
-            $struct->charset = $mime_headers->charset;
-        }
-
-        // read content encoding
-        if (!empty($part[5])) {
-            $struct->encoding = strtolower($part[5]);
-            $struct->headers['content-transfer-encoding'] = $struct->encoding;
-        }
-
-        // get part size
-        if (!empty($part[6])) {
-            $struct->size = intval($part[6]);
-        }
-
-        // read part disposition
-        $di = 8;
-        if ($struct->ctype_primary == 'text') {
-            $di += 1;
-        }
-        else if ($struct->mimetype == 'message/rfc822') {
-            $di += 3;
-        }
-
-        if (is_array($part[$di]) && count($part[$di]) == 2) {
-            $struct->disposition = strtolower($part[$di][0]);
-
-            if (is_array($part[$di][1])) {
-                for ($n=0; $n<count($part[$di][1]); $n+=2) {
-                    $struct->d_parameters[strtolower($part[$di][1][$n])] = $part[$di][1][$n+1];
-                }
-            }
-        }
-
-        // get message/rfc822's child-parts
-        if (is_array($part[8]) && $di != 8) {
-            $struct->parts = array();
-            for ($i=0, $count=0; $i<count($part[8]); $i++) {
-                if (!is_array($part[8][$i])) {
-                    break;
-                }
-                $struct->parts[] = $this->structure_part($part[8][$i], ++$count, $struct->mime_id);
-            }
-        }
-
-        // get part ID
-        if (!empty($part[3])) {
-            $struct->content_id = $part[3];
-            $struct->headers['content-id'] = $part[3];
-
-            if (empty($struct->disposition)) {
-                $struct->disposition = 'inline';
-            }
-        }
-
-        // fetch message headers if message/rfc822 or named part (could contain Content-Location header)
-        if ($struct->ctype_primary == 'message' || ($struct->ctype_parameters['name'] && !$struct->content_id)) {
-            if (empty($mime_headers)) {
-                $mime_headers = $this->conn->fetchPartHeader(
-                    $this->folder, $this->msg_uid, true, $struct->mime_id);
-            }
-
-            if (is_string($mime_headers)) {
-                $struct->headers = rcube_mime::parse_headers($mime_headers) + $struct->headers;
-            }
-            else if (is_object($mime_headers)) {
-                $struct->headers = get_object_vars($mime_headers) + $struct->headers;
-            }
-
-            // get real content-type of message/rfc822
-            if ($struct->mimetype == 'message/rfc822') {
-                // single-part
-                if (!is_array($part[8][0])) {
-                    $struct->real_mimetype = strtolower($part[8][0] . '/' . $part[8][1]);
-                }
-                // multi-part
-                else {
-                    for ($n=0; $n<count($part[8]); $n++) {
-                        if (!is_array($part[8][$n])) {
-                            break;
-                        }
-                    }
-                    $struct->real_mimetype = 'multipart/' . strtolower($part[8][$n]);
-                }
-            }
-
-            if ($struct->ctype_primary == 'message' && empty($struct->parts)) {
-                if (is_array($part[8]) && $di != 8) {
-                    $struct->parts[] = $this->structure_part($part[8], ++$count, $struct->mime_id);
-                }
-            }
-        }
-
-        // normalize filename property
-        $this->set_part_filename($struct, $mime_headers);
-
-        return $struct;
-    }
-
-
-    /**
-     * Set attachment filename from message part structure
-     *
-     * @param  rcube_message_part $part    Part object
-     * @param  string             $headers Part's raw headers
-     */
-    protected function set_part_filename(&$part, $headers=null)
-    {
-        if (!empty($part->d_parameters['filename'])) {
-            $filename_mime = $part->d_parameters['filename'];
-        }
-        else if (!empty($part->d_parameters['filename*'])) {
-            $filename_encoded = $part->d_parameters['filename*'];
-        }
-        else if (!empty($part->ctype_parameters['name*'])) {
-            $filename_encoded = $part->ctype_parameters['name*'];
-        }
-        // RFC2231 value continuations
-        // TODO: this should be rewrited to support RFC2231 4.1 combinations
-        else if (!empty($part->d_parameters['filename*0'])) {
-            $i = 0;
-            while (isset($part->d_parameters['filename*'.$i])) {
-                $filename_mime .= $part->d_parameters['filename*'.$i];
-                $i++;
-            }
-            // some servers (eg. dovecot-1.x) have no support for parameter value continuations
-            // we must fetch and parse headers "manually"
-            if ($i<2) {
-                if (!$headers) {
-                    $headers = $this->conn->fetchPartHeader(
-                        $this->folder, $this->msg_uid, true, $part->mime_id);
-                }
-                $filename_mime = '';
-                $i = 0;
-                while (preg_match('/filename\*'.$i.'\s*=\s*"*([^"\n;]+)[";]*/', $headers, $matches)) {
-                    $filename_mime .= $matches[1];
-                    $i++;
-                }
-            }
-        }
-        else if (!empty($part->d_parameters['filename*0*'])) {
-            $i = 0;
-            while (isset($part->d_parameters['filename*'.$i.'*'])) {
-                $filename_encoded .= $part->d_parameters['filename*'.$i.'*'];
-                $i++;
-            }
-            if ($i<2) {
-                if (!$headers) {
-                    $headers = $this->conn->fetchPartHeader(
-                            $this->folder, $this->msg_uid, true, $part->mime_id);
-                }
-                $filename_encoded = '';
-                $i = 0; $matches = array();
-                while (preg_match('/filename\*'.$i.'\*\s*=\s*"*([^"\n;]+)[";]*/', $headers, $matches)) {
-                    $filename_encoded .= $matches[1];
-                    $i++;
-                }
-            }
-        }
-        else if (!empty($part->ctype_parameters['name*0'])) {
-            $i = 0;
-            while (isset($part->ctype_parameters['name*'.$i])) {
-                $filename_mime .= $part->ctype_parameters['name*'.$i];
-                $i++;
-            }
-            if ($i<2) {
-                if (!$headers) {
-                    $headers = $this->conn->fetchPartHeader(
-                        $this->folder, $this->msg_uid, true, $part->mime_id);
-                }
-                $filename_mime = '';
-                $i = 0; $matches = array();
-                while (preg_match('/\s+name\*'.$i.'\s*=\s*"*([^"\n;]+)[";]*/', $headers, $matches)) {
-                    $filename_mime .= $matches[1];
-                    $i++;
-                }
-            }
-        }
-        else if (!empty($part->ctype_parameters['name*0*'])) {
-            $i = 0;
-            while (isset($part->ctype_parameters['name*'.$i.'*'])) {
-                $filename_encoded .= $part->ctype_parameters['name*'.$i.'*'];
-                $i++;
-            }
-            if ($i<2) {
-                if (!$headers) {
-                    $headers = $this->conn->fetchPartHeader(
-                        $this->folder, $this->msg_uid, true, $part->mime_id);
-                }
-                $filename_encoded = '';
-                $i = 0; $matches = array();
-                while (preg_match('/\s+name\*'.$i.'\*\s*=\s*"*([^"\n;]+)[";]*/', $headers, $matches)) {
-                    $filename_encoded .= $matches[1];
-                    $i++;
-                }
-            }
-        }
-        // read 'name' after rfc2231 parameters as it may contains truncated filename (from Thunderbird)
-        else if (!empty($part->ctype_parameters['name'])) {
-            $filename_mime = $part->ctype_parameters['name'];
-        }
-        // Content-Disposition
-        else if (!empty($part->headers['content-description'])) {
-            $filename_mime = $part->headers['content-description'];
-        }
-        else {
-            return;
-        }
-
-        // decode filename
-        if (!empty($filename_mime)) {
-            if (!empty($part->charset)) {
-                $charset = $part->charset;
-            }
-            else if (!empty($this->struct_charset)) {
-                $charset = $this->struct_charset;
-            }
-            else {
-                $charset = rcube_charset::detect($filename_mime, $this->default_charset);
-            }
-
-            $part->filename = rcube_mime::decode_mime_string($filename_mime, $charset);
-        }
-        else if (!empty($filename_encoded)) {
-            // decode filename according to RFC 2231, Section 4
-            if (preg_match("/^([^']*)'[^']*'(.*)$/", $filename_encoded, $fmatches)) {
-                $filename_charset = $fmatches[1];
-                $filename_encoded = $fmatches[2];
-            }
-
-            $part->filename = rcube_charset::convert(urldecode($filename_encoded), $filename_charset);
-        }
-    }
-
-
-    /**
-     * Get charset name from message structure (first part)
-     *
-     * @param  array $structure Message structure
-     *
-     * @return string Charset name
-     */
-    protected function structure_charset($structure)
-    {
-        while (is_array($structure)) {
-            if (is_array($structure[2]) && $structure[2][0] == 'charset') {
-                return $structure[2][1];
-            }
-            $structure = $structure[0];
-        }
-    }
-
 
     /**
      * Fetch message body of a specific message from the server
@@ -1641,6 +1132,9 @@ class rcube_pop extends rcube_storage
 
         // get part data if not provided
         if (!is_object($o_part)) {
+            $this->log('DO GET_MESSAGE_PART');
+            return null;
+
             $structure = $this->conn->getStructure($this->folder, $uid, true);
             $part_data = rcube_imap_generic::getStructurePartData($structure, $part);
 
@@ -1750,49 +1244,7 @@ class rcube_pop extends rcube_storage
      */
     public function set_flag($uids, $flag, $folder=null, $skip_cache=false)
     {
-        if (!strlen($folder)) {
-            $folder = $this->folder;
-        }
-
-        if (!$this->check_connection()) {
-            return false;
-        }
-
-        $flag = strtoupper($flag);
-        list($uids, $all_mode) = $this->parse_uids($uids);
-
-        if (strpos($flag, 'UN') === 0) {
-            $result = $this->conn->unflag($folder, $uids, substr($flag, 2));
-        }
-        else {
-            $result = $this->conn->flag($folder, $uids, $flag);
-        }
-
-        if ($result && !$skip_cache) {
-            // reload message headers if cached
-            // update flags instead removing from cache
-            if ($mcache = $this->get_mcache_engine()) {
-                $status = strpos($flag, 'UN') !== 0;
-                $mflag  = preg_replace('/^UN/', '', $flag);
-                $mcache->change_flag($folder, $all_mode ? null : explode(',', $uids),
-                    $mflag, $status);
-            }
-
-            // clear cached counters
-            if ($flag == 'SEEN' || $flag == 'UNSEEN') {
-                $this->clear_messagecount($folder, 'SEEN');
-                $this->clear_messagecount($folder, 'UNSEEN');
-            }
-            else if ($flag == 'DELETED' || $flag == 'UNDELETED') {
-                $this->clear_messagecount($folder, 'DELETED');
-                // remove cached messages
-                if ($this->options['skip_deleted']) {
-                    $this->clear_message_cache($folder, $all_mode ? null : explode(',', $uids));
-                }
-            }
-        }
-
-        return $result;
+        return false;
     }
 
 
@@ -1812,34 +1264,8 @@ class rcube_pop extends rcube_storage
      */
     public function save_message($folder, &$message, $headers='', $is_file=false, $flags = array(), $date = null, $binary = false)
     {
-        if (!strlen($folder)) {
-            $folder = $this->folder;
-        }
-
-        if (!$this->check_connection()) {
-            return false;
-        }
-
-        // make sure folder exists
-        if (!$this->folder_exists($folder)) {
-            return false;
-        }
-
-        $date = $this->date_format($date);
-
-        if ($is_file) {
-            $saved = $this->conn->appendFromFile($folder, $message, $headers, $flags, $date, $binary);
-        }
-        else {
-            $saved = $this->conn->append($folder, $message, $flags, $date, $binary);
-        }
-
-        if ($saved) {
-            // increase messagecount of the target folder
-            $this->set_messagecount($folder, 'ALL', 1);
-        }
-
-        return $saved;
+        // TODO
+        return false;
     }
 
 
@@ -1854,79 +1280,8 @@ class rcube_pop extends rcube_storage
      */
     public function move_message($uids, $to_mbox, $from_mbox='')
     {
-        if (!strlen($from_mbox)) {
-            $from_mbox = $this->folder;
-        }
-
-        if ($to_mbox === $from_mbox) {
-            return false;
-        }
-
-        list($uids, $all_mode) = $this->parse_uids($uids);
-
-        // exit if no message uids are specified
-        if (empty($uids)) {
-            return false;
-        }
-
-        if (!$this->check_connection()) {
-            return false;
-        }
-
-        // make sure folder exists
-        if ($to_mbox != 'INBOX' && !$this->folder_exists($to_mbox)) {
-            if (in_array($to_mbox, $this->default_folders)) {
-                if (!$this->create_folder($to_mbox, true)) {
-                    return false;
-                }
-            }
-            else {
-                return false;
-            }
-        }
-
-        $config = rcube::get_instance()->config;
-        $to_trash = $to_mbox == $config->get('trash_mbox');
-
-        // flag messages as read before moving them
-        if ($to_trash && $config->get('read_when_deleted')) {
-            // don't flush cache (4th argument)
-            $this->set_flag($uids, 'SEEN', $from_mbox, true);
-        }
-
-        // move messages
-        $moved = $this->conn->move($uids, $from_mbox, $to_mbox);
-
-        if ($moved) {
-            $this->clear_messagecount($from_mbox);
-            $this->clear_messagecount($to_mbox);
-        }
-        // moving failed
-        else if ($to_trash && $config->get('delete_always', false)) {
-            $moved = $this->delete_message($uids, $from_mbox);
-        }
-
-        if ($moved) {
-            // unset threads internal cache
-            unset($this->icache['threads']);
-
-            // remove message ids from search set
-            if ($this->search_set && $from_mbox == $this->folder) {
-                // threads are too complicated to just remove messages from set
-                if ($this->search_threads || $all_mode) {
-                    $this->refresh_search();
-                }
-                else {
-                    $this->search_set->filter(explode(',', $uids));
-                }
-            }
-
-            // remove cached messages
-            // @TODO: do cache update instead of clearing it
-            $this->clear_message_cache($from_mbox, $all_mode ? null : explode(',', $uids));
-        }
-
-        return $moved;
+        // TODO
+        return false;
     }
 
 
@@ -1941,41 +1296,8 @@ class rcube_pop extends rcube_storage
      */
     public function copy_message($uids, $to_mbox, $from_mbox='')
     {
-        if (!strlen($from_mbox)) {
-            $from_mbox = $this->folder;
-        }
-
-        list($uids, $all_mode) = $this->parse_uids($uids);
-
-        // exit if no message uids are specified
-        if (empty($uids)) {
-            return false;
-        }
-
-        if (!$this->check_connection()) {
-            return false;
-        }
-
-        // make sure folder exists
-        if ($to_mbox != 'INBOX' && !$this->folder_exists($to_mbox)) {
-            if (in_array($to_mbox, $this->default_folders)) {
-                if (!$this->create_folder($to_mbox, true)) {
-                    return false;
-                }
-            }
-            else {
-                return false;
-            }
-        }
-
-        // copy messages
-        $copied = $this->conn->copy($uids, $from_mbox, $to_mbox);
-
-        if ($copied) {
-            $this->clear_messagecount($to_mbox);
-        }
-
-        return $copied;
+        // TODO
+        return false;
     }
 
 
@@ -1989,49 +1311,8 @@ class rcube_pop extends rcube_storage
      */
     public function delete_message($uids, $folder='')
     {
-        if (!strlen($folder)) {
-            $folder = $this->folder;
-        }
-
-        list($uids, $all_mode) = $this->parse_uids($uids);
-
-        // exit if no message uids are specified
-        if (empty($uids)) {
-            return false;
-        }
-
-        if (!$this->check_connection()) {
-            return false;
-        }
-
-        $deleted = $this->conn->flag($folder, $uids, 'DELETED');
-
-        if ($deleted) {
-            // send expunge command in order to have the deleted message
-            // really deleted from the folder
-            $this->expunge_message($uids, $folder, false);
-            $this->clear_messagecount($folder);
-            unset($this->uid_id_map[$folder]);
-
-            // unset threads internal cache
-            unset($this->icache['threads']);
-
-            // remove message ids from search set
-            if ($this->search_set && $folder == $this->folder) {
-                // threads are too complicated to just remove messages from set
-                if ($this->search_threads || $all_mode) {
-                    $this->refresh_search();
-                }
-                else {
-                    $this->search_set->filter(explode(',', $uids));
-                }
-            }
-
-            // remove cached messages
-            $this->clear_message_cache($folder, $all_mode ? null : explode(',', $uids));
-        }
-
-        return $deleted;
+        // TODO
+        return false;
     }
 
 
@@ -2046,48 +1327,8 @@ class rcube_pop extends rcube_storage
      */
     public function expunge_message($uids, $folder = null, $clear_cache = true)
     {
-        if ($uids && $this->get_capability('UIDPLUS')) {
-            list($uids, $all_mode) = $this->parse_uids($uids);
-        }
-        else {
-            $uids = null;
-        }
-
-        if (!strlen($folder)) {
-            $folder = $this->folder;
-        }
-
-        if (!$this->check_connection()) {
-            return false;
-        }
-
-        // force folder selection and check if folder is writeable
-        // to prevent a situation when CLOSE is executed on closed
-        // or EXPUNGE on read-only folder
-        $result = $this->conn->select($folder);
-        if (!$result) {
-            return false;
-        }
-
-        if (!$this->conn->data['READ-WRITE']) {
-            $this->conn->setError(rcube_imap_generic::ERROR_READONLY, "Folder is read-only");
-            return false;
-        }
-
-        // CLOSE(+SELECT) should be faster than EXPUNGE
-        if (empty($uids) || $all_mode) {
-            $result = $this->conn->close();
-        }
-        else {
-            $result = $this->conn->expunge($folder, $uids);
-        }
-
-        if ($result && $clear_cache) {
-            $this->clear_message_cache($folder, $all_mode ? null : explode(',', $uids));
-            $this->clear_messagecount($folder);
-        }
-
-        return $result;
+        // TODO
+        return false;
     }
 
 
@@ -3335,6 +2576,52 @@ class rcube_pop extends rcube_storage
     }
 
     private function log($message) {
-        rcube::write_log('pop', $message);
+        rcube::write_log('errors', $message);
+    }
+
+    private function _message_header($msg_id) {
+        $raw = $this->conn->getParsedHeaders($msg_id);
+        $h = new rcube_message_header();
+        $h->id = $msg_id;
+        // TODO use uidl (but a uidl is not number)
+        $h->uid = $msg_id;
+        $h->subject = $raw['Subject'];
+        $h->messageID = $raw['Message-ID'];
+        $h->from = $raw['From'];
+        $h->to = $raw['To'];
+        $h->date = $raw['Date'];
+        $h->timestamp = rcube_imap_generic::strToTime($raw['Date']);
+
+        return $h;
+    }
+
+    private function _mime_message($msg_id) {
+        $this->log('MESSAGE_HEADER: %s', $msg_id);
+        $raw_msg = $this->conn->getMsg($msg_id);
+
+        $struct = rcube_mime::parse_message($raw_msg);
+        $headers = $struct->headers;
+
+        $msg = new rcube_message_header();
+        $msg->id = $msg_id;
+        // TODO use uidl (but a uidl is not number)
+        $msg->uid = $msg_id;
+        $msg->subject = $headers['subject'];
+        $msg->messageID = $headers['message-id'];
+        $msg->from = $headers['from'];
+        $msg->to = $headers['to'];
+        $msg->date = $headers['date'];
+        $msg->timestamp = rcube_imap_generic::strToTime($headers['date']);
+
+        $ctype_params = array();
+        $msg->bodystructure = array(
+            $struct->ctype_primary,
+            $struct->ctype_secondary,
+            array('charset', $struct->charset),
+        );
+
+        $msg->structure = $struct;
+        $this->struct_charset = $struct->charset;
+        return $this->icache['message'] = $msg;
     }
 }
