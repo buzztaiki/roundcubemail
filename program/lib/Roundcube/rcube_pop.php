@@ -377,37 +377,7 @@ class rcube_pop extends rcube_storage
      */
     public function get_namespace($name = null)
     {
-        $ns = $this->namespace;
-
-        if ($name) {
-            return isset($ns[$name]) ? $ns[$name] : null;
-        }
-
-        unset($ns['prefix']);
-        return $ns;
-    }
-
-
-    /**
-     * Sets delimiter and namespaces
-     */
-    protected function set_env()
-    {
-        if ($this->delimiter !== null && $this->namespace !== null) {
-            return;
-        }
-
-        $config = rcube::get_instance()->config;
-
-        if (!$this->check_connection()) {
-            return;
-        }
-
-        $this->namespace = array(
-            'personal' => NULL,
-            'other'    => NULL,
-            'shared'   => NULL,
-        );
+        return null;
     }
 
 
@@ -607,38 +577,7 @@ class rcube_pop extends rcube_storage
      */
     public function folder_status($folder = null, &$diff = array())
     {
-        if (!strlen($folder)) {
-            $folder = $this->folder;
-        }
-        $old = $this->get_folder_stats($folder);
-
-        // refresh message count -> will update
-        $this->countmessages($folder, 'ALL', true);
-
-        $result = 0;
-
-        if (empty($old)) {
-            return $result;
-        }
-
-        $new = $this->get_folder_stats($folder);
-
-        // got new messages
-        if ($new['maxuid'] > $old['maxuid']) {
-            $result += 1;
-            // get new message UIDs range, that can be used for example
-            // to get the data of these messages
-            $diff['new'] = ($old['maxuid'] + 1 < $new['maxuid'] ? ($old['maxuid']+1).':' : '') . $new['maxuid'];
-        }
-        // some messages has been deleted
-        if ($new['cnt'] < $old['cnt']) {
-            $result += 2;
-        }
-
-        // @TODO: optional checking for messages flags changes (?)
-        // @TODO: UIDVALIDITY checking
-
-        return $result;
+        return 0;
     }
 
 
@@ -831,6 +770,8 @@ class rcube_pop extends rcube_storage
      */
     public function get_message_part($uid, $part=1, $o_part=NULL, $print=NULL, $fp=NULL, $skip_charset_conv=false, $max_bytes=0, $formatted=true)
     {
+        // TODO implement this!!
+
         if (!$this->check_connection()) {
             return null;
         }
@@ -1054,68 +995,7 @@ class rcube_pop extends rcube_storage
      */
     public function list_folders_subscribed($root='', $name='*', $filter=null, $rights=null, $skip_sort=false)
     {
-        $cache_key = $root.':'.$name;
-        if (!empty($filter)) {
-            $cache_key .= ':'.(is_string($filter) ? $filter : serialize($filter));
-        }
-        $cache_key .= ':'.$rights;
-        $cache_key = 'mailboxes.'.md5($cache_key);
-
-        // get cached folder list
-        $a_mboxes = $this->get_cache($cache_key);
-        if (is_array($a_mboxes)) {
-            return $a_mboxes;
-        }
-
-        // Give plugins a chance to provide a list of folders
-        $data = rcube::get_instance()->plugins->exec_hook('storage_folders',
-            array('root' => $root, 'name' => $name, 'filter' => $filter, 'mode' => 'LSUB'));
-
-        if (isset($data['folders'])) {
-            $a_mboxes = $data['folders'];
-        }
-        else {
-            $a_mboxes = $this->list_folders_subscribed_direct($root, $name);
-        }
-
-        if (!is_array($a_mboxes)) {
-            return array();
-        }
-
-        // filter folders list according to rights requirements
-        if ($rights && $this->get_capability('ACL')) {
-            $a_mboxes = $this->filter_rights($a_mboxes, $rights);
-        }
-
-        // INBOX should always be available
-        if ((!$filter || $filter == 'mail') && !in_array('INBOX', $a_mboxes)) {
-            array_unshift($a_mboxes, 'INBOX');
-        }
-
-        // sort folders (always sort for cache)
-        if (!$skip_sort || $this->cache) {
-            $a_mboxes = $this->sort_folder_list($a_mboxes);
-        }
-
-        // write folders list to cache
-        $this->update_cache($cache_key, $a_mboxes);
-
-        return $a_mboxes;
-    }
-
-
-    /**
-     * Method for direct folders listing (LSUB)
-     *
-     * @param   string  $root   Optional root folder
-     * @param   string  $name   Optional name pattern
-     *
-     * @return  array   List of subscribed folders
-     * @see     rcube_imap::list_folders_subscribed()
-     */
-    public function list_folders_subscribed_direct($root='', $name='*')
-    {
-        return $this->list_folders($root, $name);
+        return $this->list_folders($root, $name, $filter, $rights, $skip_sort);
     }
 
 
@@ -1137,46 +1017,6 @@ class rcube_pop extends rcube_storage
 
 
     /**
-     * Method for direct folders listing (LIST)
-     *
-     * @param   string  $root   Optional root folder
-     * @param   string  $name   Optional name pattern
-     *
-     * @return  array   List of folders
-     * @see     rcube_imap::list_folders()
-     */
-    public function list_folders_direct($root='', $name='*')
-    {
-        return $this->list_folders($root, $name);
-    }
-
-    /**
-     * Filter the given list of folders according to access rights
-     *
-     * For performance reasons we assume user has full rights
-     * on all personal folders.
-     */
-    protected function filter_rights($a_folders, $rights)
-    {
-        $regex = '/('.$rights.')/';
-
-        foreach ($a_folders as $idx => $folder) {
-            if ($this->folder_namespace($folder) == 'personal') {
-                continue;
-            }
-
-            $myrights = join('', (array)$this->my_rights($folder));
-
-            if ($myrights !== null && !preg_match($regex, $myrights)) {
-                unset($a_folders[$idx]);
-            }
-        }
-
-        return $a_folders;
-    }
-
-
-    /**
      * Get mailbox quota information
      * added by Nuny
      *
@@ -1184,10 +1024,6 @@ class rcube_pop extends rcube_storage
      */
     public function get_quota()
     {
-        if ($this->get_capability('QUOTA') && $this->check_connection()) {
-            return $this->conn->getQuota();
-        }
-
         return false;
     }
 
@@ -1201,18 +1037,7 @@ class rcube_pop extends rcube_storage
      */
     public function folder_size($folder)
     {
-        if (!$this->check_connection()) {
-            return 0;
-        }
-
-        // @TODO: could we try to use QUOTA here?
-        $result = $this->conn->fetchHeaderIndex($folder, '1:*', 'SIZE', false);
-
-        if (is_array($result)) {
-            $result = array_sum($result);
-        }
-
-        return $result;
+        return 0;
     }
 
 
@@ -1252,23 +1077,7 @@ class rcube_pop extends rcube_storage
      */
     public function create_folder($folder, $subscribe=false)
     {
-        if (!$this->check_connection()) {
-            return false;
-        }
-
-        $result = $this->conn->createFolder($folder);
-
-        // try to subscribe it
-        if ($result) {
-            // clear cache
-            $this->clear_cache('mailboxes', true);
-
-            if ($subscribe) {
-                $this->subscribe($folder);
-            }
-        }
-
-        return $result;
+        return false;
     }
 
 
@@ -1282,53 +1091,7 @@ class rcube_pop extends rcube_storage
      */
     public function rename_folder($folder, $new_name)
     {
-        if (!strlen($new_name)) {
-            return false;
-        }
-
-        if (!$this->check_connection()) {
-            return false;
-        }
-
-        $delm = $this->get_hierarchy_delimiter();
-
-        // get list of subscribed folders
-        if ((strpos($folder, '%') === false) && (strpos($folder, '*') === false)) {
-            $a_subscribed = $this->list_folders_subscribed('', $folder . $delm . '*');
-            $subscribed   = $this->folder_exists($folder, true);
-        }
-        else {
-            $a_subscribed = $this->list_folders_subscribed();
-            $subscribed   = in_array($folder, $a_subscribed);
-        }
-
-        $result = $this->conn->renameFolder($folder, $new_name);
-
-        if ($result) {
-            // unsubscribe the old folder, subscribe the new one
-            if ($subscribed) {
-                $this->conn->unsubscribe($folder);
-                $this->conn->subscribe($new_name);
-            }
-
-            // check if folder children are subscribed
-            foreach ($a_subscribed as $c_subscribed) {
-                if (strpos($c_subscribed, $folder.$delm) === 0) {
-                    $this->conn->unsubscribe($c_subscribed);
-                    $this->conn->subscribe(preg_replace('/^'.preg_quote($folder, '/').'/',
-                        $new_name, $c_subscribed));
-
-                    // clear cache
-                    $this->clear_message_cache($c_subscribed);
-                }
-            }
-
-            // clear cache
-            $this->clear_message_cache($folder);
-            $this->clear_cache('mailboxes', true);
-        }
-
-        return $result;
+        return false;
     }
 
 
@@ -1341,42 +1104,7 @@ class rcube_pop extends rcube_storage
      */
     function delete_folder($folder)
     {
-        $delm = $this->get_hierarchy_delimiter();
-
-        if (!$this->check_connection()) {
-            return false;
-        }
-
-        // get list of folders
-        if ((strpos($folder, '%') === false) && (strpos($folder, '*') === false)) {
-            $sub_mboxes = $this->list_folders('', $folder . $delm . '*');
-        }
-        else {
-            $sub_mboxes = $this->list_folders();
-        }
-
-        // send delete command to server
-        $result = $this->conn->deleteFolder($folder);
-
-        if ($result) {
-            // unsubscribe folder
-            $this->conn->unsubscribe($folder);
-
-            foreach ($sub_mboxes as $c_mbox) {
-                if (strpos($c_mbox, $folder.$delm) === 0) {
-                    $this->conn->unsubscribe($c_mbox);
-                    if ($this->conn->deleteFolder($c_mbox)) {
-                        $this->clear_message_cache($c_mbox);
-                    }
-                }
-            }
-
-            // clear folder-related cache
-            $this->clear_message_cache($folder);
-            $this->clear_cache('mailboxes', true);
-        }
-
-        return $result;
+        return false;
     }
 
 
@@ -1385,15 +1113,6 @@ class rcube_pop extends rcube_storage
      */
     public function create_default_folders()
     {
-        // create default folders if they do not exist
-        foreach ($this->default_folders as $folder) {
-            if (!$this->folder_exists($folder)) {
-                $this->create_folder($folder, true);
-            }
-            else if (!$this->folder_exists($folder, true)) {
-                $this->subscribe($folder);
-            }
-        }
     }
 
 
@@ -1424,24 +1143,6 @@ class rcube_pop extends rcube_storage
      */
     public function folder_namespace($folder)
     {
-        if ($folder == 'INBOX') {
-            return 'personal';
-        }
-
-        foreach ($this->namespace as $type => $namespace) {
-            if (is_array($namespace)) {
-                foreach ($namespace as $ns) {
-                    if ($len = strlen($ns[0])) {
-                        if (($len > 1 && $folder == substr($ns[0], 0, -1))
-                            || strpos($folder, $ns[0]) === 0
-                        ) {
-                            return $type;
-                        }
-                    }
-                }
-            }
-        }
-
         return 'personal';
     }
 
@@ -1459,28 +1160,6 @@ class rcube_pop extends rcube_storage
      */
     public function mod_folder($folder, $mode = 'out')
     {
-        if (!strlen($folder)) {
-            return $folder;
-        }
-
-        $prefix     = $this->namespace['prefix']; // see set_env()
-        $prefix_len = strlen($prefix);
-
-        if (!$prefix_len) {
-            return $folder;
-        }
-
-        // remove prefix for output
-        if ($mode == 'out') {
-            if (substr($folder, 0, $prefix_len) === $prefix) {
-                return substr($folder, $prefix_len);
-            }
-        }
-        // add prefix for input (e.g. folder creation)
-        else {
-            return $prefix . $folder;
-        }
-
         return $folder;
     }
 
@@ -1522,90 +1201,7 @@ class rcube_pop extends rcube_storage
      */
     public function folder_info($folder)
     {
-        if ($this->icache['options'] && $this->icache['options']['name'] == $folder) {
-            return $this->icache['options'];
-        }
-
-        // get cached metadata
-        $cache_key = 'mailboxes.folder-info.' . $folder;
-        $cached = $this->get_cache($cache_key);
-
-        if (is_array($cached)) {
-            return $cached;
-        }
-
-        $acl       = $this->get_capability('ACL');
-        $namespace = $this->get_namespace();
-        $options   = array();
-
-        // check if the folder is a namespace prefix
-        if (!empty($namespace)) {
-            $mbox = $folder . $this->delimiter;
-            foreach ($namespace as $ns) {
-                if (!empty($ns)) {
-                    foreach ($ns as $item) {
-                        if ($item[0] === $mbox) {
-                            $options['is_root'] = true;
-                            break 2;
-                        }
-                    }
-                }
-            }
-        }
-        // check if the folder is other user virtual-root
-        if (!$options['is_root'] && !empty($namespace) && !empty($namespace['other'])) {
-            $parts = explode($this->delimiter, $folder);
-            if (count($parts) == 2) {
-                $mbox = $parts[0] . $this->delimiter;
-                foreach ($namespace['other'] as $item) {
-                    if ($item[0] === $mbox) {
-                        $options['is_root'] = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        $options['name']       = $folder;
-        $options['attributes'] = $this->folder_attributes($folder, true);
-        $options['namespace']  = $this->folder_namespace($folder);
-        $options['special']    = in_array($folder, $this->default_folders);
-
-        // Set 'noselect' flag
-        if (is_array($options['attributes'])) {
-            foreach ($options['attributes'] as $attrib) {
-                $attrib = strtolower($attrib);
-                if ($attrib == '\noselect' || $attrib == '\nonexistent') {
-                    $options['noselect'] = true;
-                }
-            }
-        }
-        else {
-            $options['noselect'] = true;
-        }
-
-        // Get folder rights (MYRIGHTS)
-        if ($acl && ($rights = $this->my_rights($folder))) {
-            $options['rights'] = $rights;
-        }
-
-        // Set 'norename' flag
-        if (!empty($options['rights'])) {
-            $options['norename'] = !in_array('x', $options['rights']) && !in_array('d', $options['rights']);
-
-            if (!$options['noselect']) {
-                $options['noselect'] = !in_array('r', $options['rights']);
-            }
-        }
-        else {
-            $options['norename'] = $options['is_root'] || $options['namespace'] != 'personal';
-        }
-
-        // update caches
-        $this->icache['options'] = $options;
-        $this->update_cache($cache_key, $options);
-
-        return $options;
+        return array();
     }
 
 
@@ -1616,9 +1212,6 @@ class rcube_pop extends rcube_storage
      */
     public function folder_sync($folder)
     {
-        if ($mcache = $this->get_mcache_engine()) {
-            $mcache->synchronize($folder);
-        }
     }
 
 
