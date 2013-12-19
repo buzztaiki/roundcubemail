@@ -1789,6 +1789,8 @@ class rcube_pop extends rcube_storage
     }
 
     private function _mime_message($msg_id) {
+        // TODO check message size
+
         $this->log('MESSAGE_HEADER: %s', $msg_id);
         $raw_msg = $this->conn->getMsg($msg_id);
 
