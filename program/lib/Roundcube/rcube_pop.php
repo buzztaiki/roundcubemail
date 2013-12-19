@@ -60,11 +60,6 @@ class rcube_pop extends rcube_storage
     protected $struct_charset;
     protected $uid_id_map = array();
     protected $msg_headers = array();
-    protected $search_set;
-    protected $search_string = '';
-    protected $search_charset = '';
-    protected $search_sort_field = '';
-    protected $search_sorted = false;
     protected $options = array('auth_type' => 'check');
     protected $caching = false;
     protected $messages_caching = false;
@@ -307,13 +302,6 @@ class rcube_pop extends rcube_storage
      */
     public function set_search_set($set)
     {
-        $set = (array)$set;
-
-        $this->search_string     = $set[0];
-        $this->search_set        = $set[1];
-        $this->search_charset    = $set[2];
-        $this->search_sort_field = $set[3];
-        $this->search_sorted     = $set[4];
     }
 
 
@@ -324,17 +312,7 @@ class rcube_pop extends rcube_storage
      */
     public function get_search_set()
     {
-        if (empty($this->search_set)) {
-            return null;
-        }
-
-        return array(
-            $this->search_string,
-            $this->search_set,
-            $this->search_charset,
-            $this->search_sort_field,
-            $this->search_sorted,
-        );
+        return null;
     }
 
 
@@ -518,11 +496,6 @@ class rcube_pop extends rcube_storage
         $this->set_sort_order($sort_field, $sort_order);
         $page = $page ? $page : $this->list_page;
 
-        // use saved message set
-        if ($this->search_string && $folder == $this->folder) {
-            return $this->list_search_messages($folder, $page, $slice);
-        }
-
         // get UIDs of all messages in the folder, sorted
         $index = $this->index($folder, $this->sort_field, $this->sort_order);
 
@@ -570,120 +543,6 @@ class rcube_pop extends rcube_storage
     function threads_direct($folder)
     {
         return new rcube_result_thread();
-    }
-
-
-    /**
-     * protected method for listing a set of message headers (search results)
-     *
-     * @param   string   $folder   Folder name
-     * @param   int      $page     Current page to list
-     * @param   int      $slice    Number of slice items to extract from result array
-     *
-     * @return  array    Indexed array with message header objects
-     */
-    protected function list_search_messages($folder, $page, $slice=0)
-    {
-        if (!strlen($folder) || empty($this->search_set) || $this->search_set->is_empty()) {
-            return array();
-        }
-
-        $index = clone $this->search_set;
-        $from  = ($page-1) * $this->page_size;
-        $to    = $from + $this->page_size;
-
-        // return empty array if no messages found
-        if ($index->is_empty()) {
-            return array();
-        }
-
-        // quickest method (default sorting)
-        if (!$this->search_sort_field && !$this->sort_field) {
-            $got_index = true;
-        }
-        // sorted messages, so we can first slice array and then fetch only wanted headers
-        else if ($this->search_sorted) { // SORT searching result
-            $got_index = true;
-            // reset search set if sorting field has been changed
-            if ($this->sort_field && $this->search_sort_field != $this->sort_field) {
-                $this->search('', $this->search_string, $this->search_charset, $this->sort_field);
-
-                $index = clone $this->search_set;
-
-                // return empty array if no messages found
-                if ($index->is_empty()) {
-                    return array();
-                }
-            }
-        }
-
-        if ($got_index) {
-            if ($this->sort_order != $index->get_parameters('ORDER')) {
-                $index->revert();
-            }
-
-            // get messages uids for one page
-            $index->slice($from, $to-$from);
-
-            if ($slice) {
-                $index->slice(-$slice, $slice);
-            }
-
-            // fetch headers
-            $a_index       = $index->get();
-            $a_msg_headers = $this->fetch_headers($folder, $a_index);
-
-            return array_values($a_msg_headers);
-        }
-
-        // SEARCH result, need sorting
-        $cnt = $index->count();
-
-        // 300: experimantal value for best result
-        if (($cnt > 300 && $cnt > $this->page_size) || !$this->sort_field) {
-            // use memory less expensive (and quick) method for big result set
-            $index = clone $this->index('', $this->sort_field, $this->sort_order);
-            // get messages uids for one page...
-            $index->slice($from, min($cnt-$from, $this->page_size));
-
-            if ($slice) {
-                $index->slice(-$slice, $slice);
-            }
-
-            // ...and fetch headers
-            $a_index       = $index->get();
-            $a_msg_headers = $this->fetch_headers($folder, $a_index);
-
-            return array_values($a_msg_headers);
-        }
-        else {
-            // for small result set we can fetch all messages headers
-            $a_index       = $index->get();
-            $a_msg_headers = $this->fetch_headers($folder, $a_index, false);
-
-            // return empty array if no messages found
-            if (!is_array($a_msg_headers) || empty($a_msg_headers)) {
-                return array();
-            }
-
-            if (!$this->check_connection()) {
-                return array();
-            }
-
-            // if not already sorted
-            $a_msg_headers = $this->conn->sortHeaders(
-                $a_msg_headers, $this->sort_field, $this->sort_order);
-
-            // only return the requested part of the set
-            $slice_length  = min($this->page_size, $cnt - ($to > $cnt ? $from : $to));
-            $a_msg_headers = array_slice(array_values($a_msg_headers), $from, $slice_length);
-
-            if ($slice) {
-                $a_msg_headers = array_slice($a_msg_headers, -$slice, $slice);
-            }
-
-            return $a_msg_headers;
-        }
     }
 
 
@@ -898,10 +757,6 @@ class rcube_pop extends rcube_storage
      */
     public function refresh_search()
     {
-        if (!empty($this->search_string)) {
-            $this->search('', $this->search_string, $this->search_charset, $this->search_sort_field);
-        }
-
         return $this->get_search_set();
     }
 
