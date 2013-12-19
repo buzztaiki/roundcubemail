@@ -64,12 +64,10 @@ class rcube_pop extends rcube_storage
     protected $search_string = '';
     protected $search_charset = '';
     protected $search_sort_field = '';
-    protected $search_threads = false;
     protected $search_sorted = false;
     protected $options = array('auth_type' => 'check');
     protected $caching = false;
     protected $messages_caching = false;
-    protected $threading = false;
     protected $connected = false;
 
 
@@ -316,7 +314,6 @@ class rcube_pop extends rcube_storage
         $this->search_charset    = $set[2];
         $this->search_sort_field = $set[3];
         $this->search_sorted     = $set[4];
-        $this->search_threads    = is_a($this->search_set, 'rcube_result_thread');
     }
 
 
@@ -526,10 +523,6 @@ class rcube_pop extends rcube_storage
             return $this->list_search_messages($folder, $page, $slice);
         }
 
-        if ($this->threading) {
-            return $this->list_thread_messages($folder, $page, $slice);
-        }
-
         // get UIDs of all messages in the folder, sorted
         $index = $this->index($folder, $this->sort_field, $this->sort_order);
 
@@ -555,29 +548,6 @@ class rcube_pop extends rcube_storage
 
 
     /**
-     * protected method for listing message headers using threads
-     *
-     * @param   string   $folder     Folder name
-     * @param   int      $page       Current page to list
-     * @param   int      $slice      Number of slice items to extract from result array
-     *
-     * @return  array    Indexed array with message header objects
-     * @see     rcube_imap::list_messages
-     */
-    protected function list_thread_messages($folder, $page, $slice=0)
-    {
-        // get all threads (not sorted)
-        if ($mcache = $this->get_mcache_engine()) {
-            $threads = $mcache->get_thread($folder);
-        }
-        else {
-            $threads = $this->threads($folder);
-        }
-
-        return $this->fetch_thread_headers($folder, $threads, $page, $slice);
-    }
-
-    /**
      * Method for fetching threads data
      *
      * @param  string $folder Folder name
@@ -586,22 +556,7 @@ class rcube_pop extends rcube_storage
      */
     function threads($folder)
     {
-        if ($mcache = $this->get_mcache_engine()) {
-            // don't store in self's internal cache, cache has it's own internal cache
-            return $mcache->get_thread($folder);
-        }
-
-        if (!empty($this->icache['threads'])) {
-            if ($this->icache['threads']->get_parameters('MAILBOX') == $folder) {
-                return $this->icache['threads'];
-            }
-        }
-
-        // get all threads
-        $result = $this->threads_direct($folder);
-
-        // add to internal (fast) cache
-        return $this->icache['threads'] = $result;
+        return new rcube_result_thread();
     }
 
 
@@ -619,77 +574,6 @@ class rcube_pop extends rcube_storage
 
 
     /**
-     * protected method for fetching threaded messages headers
-     *
-     * @param string              $folder     Folder name
-     * @param rcube_result_thread $threads    Threads data object
-     * @param int                 $page       List page number
-     * @param int                 $slice      Number of threads to slice
-     *
-     * @return array  Messages headers
-     */
-    protected function fetch_thread_headers($folder, $threads, $page, $slice=0)
-    {
-        // Sort thread structure
-        $this->sort_threads($threads);
-
-        $from = ($page-1) * $this->page_size;
-        $to   = $from + $this->page_size;
-
-        $threads->slice($from, $to - $from);
-
-        if ($slice) {
-            $threads->slice(-$slice, $slice);
-        }
-
-        // Get UIDs of all messages in all threads
-        $a_index = $threads->get();
-
-        // fetch reqested headers from server
-        $a_msg_headers = $this->fetch_headers($folder, $a_index);
-
-        unset($a_index);
-
-        // Set depth, has_children and unread_children fields in headers
-        $this->set_thread_flags($a_msg_headers, $threads);
-
-        return array_values($a_msg_headers);
-    }
-
-
-    /**
-     * protected method for setting threaded messages flags:
-     * depth, has_children and unread_children
-     *
-     * @param  array               $headers  Reference to headers array indexed by message UID
-     * @param  rcube_result_thread $threads  Threads data object
-     *
-     * @return array Message headers array indexed by message UID
-     */
-    protected function set_thread_flags(&$headers, $threads)
-    {
-        $parents = array();
-
-        list ($msg_depth, $msg_children) = $threads->get_thread_data();
-
-        foreach ($headers as $uid => $header) {
-            $depth = $msg_depth[$uid];
-            $parents = array_slice($parents, 0, $depth);
-
-            if (!empty($parents)) {
-                $headers[$uid]->parent_uid = end($parents);
-                if (empty($header->flags['SEEN']))
-                    $headers[$parents[0]]->unread_children++;
-            }
-            array_push($parents, $uid);
-
-            $headers[$uid]->depth = $depth;
-            $headers[$uid]->has_children = $msg_children[$uid];
-        }
-    }
-
-
-    /**
      * protected method for listing a set of message headers (search results)
      *
      * @param   string   $folder   Folder name
@@ -702,16 +586,6 @@ class rcube_pop extends rcube_storage
     {
         if (!strlen($folder) || empty($this->search_set) || $this->search_set->is_empty()) {
             return array();
-        }
-
-        // use saved messages from searching
-        if ($this->threading) {
-            return $this->list_search_thread_messages($folder, $page, $slice);
-        }
-
-        // search set is threaded, we need a new one
-        if ($this->search_threads) {
-            $this->search('', $this->search_string, $this->search_charset, $this->sort_field);
         }
 
         $index = clone $this->search_set;
@@ -810,30 +684,6 @@ class rcube_pop extends rcube_storage
 
             return $a_msg_headers;
         }
-    }
-
-
-    /**
-     * protected method for listing a set of threaded message headers (search results)
-     *
-     * @param   string   $folder     Folder name
-     * @param   int      $page       Current page to list
-     * @param   int      $slice      Number of slice items to extract from result array
-     *
-     * @return  array    Indexed array with message header objects
-     * @see rcube_imap::list_search_messages()
-     */
-    protected function list_search_thread_messages($folder, $page, $slice=0)
-    {
-        // update search_set if previous data was fetched with disabled threading
-        if (!$this->search_threads) {
-            if ($this->search_set->is_empty()) {
-                return array();
-            }
-            $this->search('', $this->search_string, $this->search_charset, $this->sort_field);
-        }
-
-        return $this->fetch_thread_headers($folder, clone $this->search_set, $page, $slice);
     }
 
 
@@ -2573,6 +2423,15 @@ class rcube_pop extends rcube_storage
     public function expunge($folder='', $clear_cache=true)
     {
         return $this->expunge_folder($folder, $clear_cache);
+    }
+
+    public function set_threading($enable = false)
+    {
+        return false;
+    }
+    public function get_threading()
+    {
+        return false;
     }
 
     private function log($message) {
