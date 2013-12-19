@@ -1225,8 +1225,7 @@ class rcube_pop extends rcube_storage
      */
     public function subscribe($folders)
     {
-        // let this common function do the main work
-        return $this->change_subscription($folders, 'subscribe');
+        return false;
     }
 
 
@@ -1239,8 +1238,7 @@ class rcube_pop extends rcube_storage
      */
     public function unsubscribe($folders)
     {
-        // let this common function do the main work
-        return $this->change_subscription($folders, 'unsubscribe');
+        return false;
     }
 
 
@@ -2021,118 +2019,6 @@ class rcube_pop extends rcube_storage
             }
         }
         reset($list);
-    }
-
-
-    /**
-     * Find UID of the specified message sequence ID
-     *
-     * @param int    $id       Message (sequence) ID
-     * @param string $folder   Folder name
-     *
-     * @return int Message UID
-     */
-    public function id2uid($id, $folder = null)
-    {
-        if (!strlen($folder)) {
-            $folder = $this->folder;
-        }
-
-        if ($uid = array_search($id, (array)$this->uid_id_map[$folder])) {
-            return $uid;
-        }
-
-        if (!$this->check_connection()) {
-            return null;
-        }
-
-        $uid = $this->conn->ID2UID($folder, $id);
-
-        $this->uid_id_map[$folder][$uid] = $id;
-
-        return $uid;
-    }
-
-
-    /**
-     * Subscribe/unsubscribe a list of folders and update local cache
-     */
-    protected function change_subscription($folders, $mode)
-    {
-        return false;
-    }
-
-
-    /**
-     * Increde/decrese messagecount for a specific folder
-     */
-    protected function set_messagecount($folder, $mode, $increment)
-    {
-        if (!is_numeric($increment)) {
-            return false;
-        }
-
-        $mode = strtoupper($mode);
-        $a_folder_cache = $this->get_cache('messagecount');
-
-        if (!is_array($a_folder_cache[$folder]) || !isset($a_folder_cache[$folder][$mode])) {
-            return false;
-        }
-
-        // add incremental value to messagecount
-        $a_folder_cache[$folder][$mode] += $increment;
-
-        // there's something wrong, delete from cache
-        if ($a_folder_cache[$folder][$mode] < 0) {
-            unset($a_folder_cache[$folder][$mode]);
-        }
-
-        // write back to cache
-        $this->update_cache('messagecount', $a_folder_cache);
-
-        return true;
-    }
-
-
-    /**
-     * Remove messagecount of a specific folder from cache
-     */
-    protected function clear_messagecount($folder, $mode=null)
-    {
-        $a_folder_cache = $this->get_cache('messagecount');
-
-        if (is_array($a_folder_cache[$folder])) {
-            if ($mode) {
-                unset($a_folder_cache[$folder][$mode]);
-            }
-            else {
-                unset($a_folder_cache[$folder]);
-            }
-            $this->update_cache('messagecount', $a_folder_cache);
-        }
-    }
-
-
-    /**
-     * Converts date string/object into IMAP date/time format
-     */
-    protected function date_format($date)
-    {
-        if (empty($date)) {
-            return null;
-        }
-
-        if (!is_object($date) || !is_a($date, 'DateTime')) {
-            try {
-                $timestamp = rcube_utils::strtotime($date);
-                $date      = new DateTime("@".$timestamp);
-            }
-            catch (Exception $e) {
-                return null;
-            }
-        }
-
-        return $date->format('d-M-Y H:i:s O');
     }
 
 
