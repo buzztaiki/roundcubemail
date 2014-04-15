@@ -28,6 +28,9 @@ function rcube_treelist_widget(node, p)
     id_prefix: '',
     autoexpand: 1000,
     selectable: false,
+    scroll_delay: 500,
+    scroll_step: 5,
+    scroll_speed: 20,
     check_droptarget: function(node){ return !node.virtual }
   }, p || {});
 
@@ -42,6 +45,7 @@ function rcube_treelist_widget(node, p)
     autoexpand_item,
     body_scroll_top = 0,
     list_scroll_top = 0,
+    scroll_timer,
     me = this;
 
 
@@ -52,6 +56,7 @@ function rcube_treelist_widget(node, p)
   this.collapse = collapse;
   this.select = select;
   this.render = render;
+  this.reset = reset;
   this.drag_start = drag_start;
   this.drag_end = drag_end;
   this.intersects = intersects;
@@ -76,6 +81,7 @@ function rcube_treelist_widget(node, p)
   // register click handlers on list
   container.on('click', 'div.treetoggle', function(e){
     toggle(dom2id($(this).parent()));
+    e.stopPropagation();
   });
 
   container.on('click', 'li', function(e){
@@ -100,8 +106,8 @@ function rcube_treelist_widget(node, p)
       node.collapsed = typeof set == 'undefined' || set;
       update_dom(node);
 
-      // Work around a bug in IE6 and IE7, see #1485309
-      if (window.bw && (bw.ie6 || bw.ie7) && node.collapsed) {
+      // Work around a bug in IE7, see #1485309
+      if (window.bw && bw.ie7 && node.collapsed) {
         id2dom(node.id).next().children('ul:visible').hide().show();
       }
 
@@ -310,6 +316,20 @@ function rcube_treelist_widget(node, p)
   }
 
   /**
+   *
+   */
+  function reset()
+  {
+    select('');
+
+    data = [];
+    indexbyid = {};
+    drag_active = false;
+
+    container.html('');
+  }
+
+  /**
    * Render the tree list from the internal data structure
    */
   function render()
@@ -461,6 +481,7 @@ function rcube_treelist_widget(node, p)
 
     body_scroll_top = bw.ie ? 0 : window.pageYOffset;
     list_scroll_top = container.parent().scrollTop();
+    pos.top += list_scroll_top;
 
     drag_active = true;
     box_coords = {
@@ -476,6 +497,7 @@ function rcube_treelist_widget(node, p)
       item = li.children().first().get(0);
       if (height = item.offsetHeight) {
         pos = $(item).offset();
+        pos.top += list_scroll_top;
         item_coords[id] = {
           x1: pos.left,
           y1: pos.top,
@@ -485,6 +507,38 @@ function rcube_treelist_widget(node, p)
         };
       }
     }
+
+    // enable auto-scrolling of list container
+    if (container.height() > container.parent().height()) {
+      container.parent()
+        .mousemove(function(e) {
+          var scroll = 0,
+            mouse = rcube_event.get_mouse_pos(e);
+          mouse.y -= container.parent().offset().top;
+
+          if (mouse.y < 25 && list_scroll_top > 0) {
+            scroll = -1; // up
+          }
+          else if (mouse.y > container.parent().height() - 25) {
+            scroll = 1; // down
+          }
+
+          if (drag_active && scroll != 0) {
+            if (!scroll_timer)
+              scroll_timer = window.setTimeout(function(){ drag_scroll(scroll); }, p.scroll_delay);
+          }
+          else if (scroll_timer) {
+            window.clearTimeout(scroll_timer);
+            scroll_timer = null;
+          }
+        })
+        .mouseleave(function() {
+          if (scroll_timer) {
+            window.clearTimeout(scroll_timer);
+            scroll_timer = null;
+          }
+        });
+    }
   }
 
   /**
@@ -493,6 +547,7 @@ function rcube_treelist_widget(node, p)
   function drag_end()
   {
     drag_active = false;
+    scroll_timer = null;
 
     if (autoexpand_timer) {
       clearTimeout(autoexpand_timer);
@@ -504,16 +559,33 @@ function rcube_treelist_widget(node, p)
   }
 
   /**
+   * Scroll list container in the given direction
+   */
+  function drag_scroll(dir)
+  {
+    if (!drag_active)
+      return;
+
+    var old_top = list_scroll_top;
+    container.parent().get(0).scrollTop += p.scroll_step * dir;
+    list_scroll_top = container.parent().scrollTop();
+    scroll_timer = null;
+
+    if (list_scroll_top != old_top)
+      scroll_timer = window.setTimeout(function(){ drag_scroll(dir); }, p.scroll_speed);
+  }
+
+  /**
    * Determine if the given mouse coords intersect the list and one if its items
    */
   function intersects(mouse, highlight)
   {
     // offsets to compensate for scrolling while dragging a message
     var boffset = bw.ie ? -document.documentElement.scrollTop : body_scroll_top,
-      moffset = list_scroll_top - container.parent().scrollTop(),
+      moffset = container.parent().scrollTop(),
       result = null;
 
-    mouse.top = mouse.y + -moffset - boffset;
+    mouse.top = mouse.y + moffset - boffset;
 
     // no intersection with list bounding box
     if (mouse.x < box_coords.x1 || mouse.x >= box_coords.x2 || mouse.top < box_coords.y1 || mouse.top >= box_coords.y2) {

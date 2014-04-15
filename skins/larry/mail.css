@@ -34,10 +34,11 @@
 
 #mailview-top {
 	position: absolute;
-	top: 42px;
+	top: 0;
 	left: 0;
 	right: 0;
 	bottom: 0px;
+	overflow: visible; /* fixes display issues of fixed list header in IE */
 }
 
 #mailview-bottom {
@@ -55,16 +56,10 @@
 	border-radius: 0 0 4px 4px;
 }
 
-#folderlist-header {
-	width: 100%;
-	height: 12px;
-	top: 32px;
-}
-
 #mailboxcontainer,
 #messagelistcontainer {
 	position: absolute;
-	top: 42px;
+	top: 0;
 	left: 0;
 	width: 100%;
 	bottom: 0;
@@ -207,6 +202,14 @@ a.iconbutton.threadmode.selected {
 	background-position: 6px -406px;
 }
 
+#mailboxlist li.mailbox.trash.empty > a {
+	background-position: 6px -1924px;
+}
+
+#mailboxlist li.mailbox.trash.empty.selected > a {
+	background-position: 6px -1948px;
+}
+
 #mailboxlist li.mailbox.archive > a {
 	background-position: 6px -1699px;
 }
@@ -245,6 +248,14 @@ a.iconbutton.threadmode.selected {
 
 #mailboxlist li.mailbox ul li.trash.selected > a {
 	background-position: 23px -406px;
+}
+
+#mailboxlist li.mailbox ul li.trash.empty > a {
+	background-position: 23px -1924px;
+}
+
+#mailboxlist li.mailbox ul li.trash.empty.selected > a {
+	background-position: 23px -1948px;
 }
 
 #mailboxlist li.mailbox ul li.archive > a {
@@ -501,6 +512,18 @@ table.messagelist.fixedcopy {
 
 .messagelist tr td.date {
 	width: 155px;
+}
+
+.messagelist tr td.folder {
+	width: 135px;
+}
+
+.messagelist tr td.folder {
+	width: 135px;
+}
+
+.messagelist tr td.hidden {
+	display: none;
 }
 
 .messagelist tr.message {
@@ -1055,20 +1078,20 @@ div.hide-headers {
 	margin: 8px;
 }
 
-#message-objects div.notice,
-#message-buttons div.notice {
+#message-objects div.notice {
 	display: block;
 	color: #960;
 	border: 1px solid #ffdf0e;
 	background-color: #fef893;
 	background-position: 5px -83px;
-	padding: 6px 12px 4px 30px;
+	padding: 6px 12px 6px 30px;
 	white-space: normal;
 }
 
 #message-objects div a.button,
 #messagebody span.part-notice a.button {
 	margin-left: 10px;
+	margin-top: -1px;
 }
 
 div.message-part,
@@ -1192,7 +1215,7 @@ div.message-partheaders .headers-table td.header {
 
 #messagepartcontainer {
 	position: absolute;
-	top: 42px;
+	top: 0;
 	left: 232px;
 	right: 0;
 	bottom: 0;
@@ -1206,7 +1229,7 @@ div.message-partheaders .headers-table td.header {
 
 #messagepartheader {
 	position: absolute;
-	top: 42px;
+	top: 0;
 	left: 0;
 	width: 220px;
 	bottom: 0;
@@ -1248,7 +1271,7 @@ div.message-partheaders .headers-table td.header {
 
 #compose-contacts {
 	position: absolute;
-	top: 42px;
+	top: 0;
 	left: 0;
 	width: 100%;
 	bottom: 0;
@@ -1351,7 +1374,7 @@ div.message-partheaders .headers-table td.header {
 
 #compose-content {
 	position: absolute;
-	top: 42px;
+	top: 0;
 	left: 0;
 	right: 0;
 	bottom: 0px;
@@ -1441,7 +1464,6 @@ div.message-partheaders .headers-table td.header {
 	-o-box-shadow: inset 0 1px 0 0 #fff;
 	-webkit-box-shadow: inset 0 1px 0 0 #fff;
 	-moz-box-shadow: inset 0 1px 0 0 #fff;
-
 }
 
 .composeoption {

@@ -73,6 +73,7 @@ class rcube_imap_generic
     const COMMAND_NORESPONSE = 1;
     const COMMAND_CAPABILITY = 2;
     const COMMAND_LASTLINE   = 4;
+    const COMMAND_ANONYMIZED = 8;
 
     const DEBUG_LINE_LENGTH = 4098; // 4KB + 2B for \r\n
 
@@ -88,16 +89,28 @@ class rcube_imap_generic
      *
      * @param string $string Command string
      * @param bool   $endln  True if CRLF need to be added at the end of command
+     * @param bool   $anonymized Don't write the given data to log but a placeholder
      *
      * @param int Number of bytes sent, False on error
      */
-    function putLine($string, $endln=true)
+    function putLine($string, $endln=true, $anonymized=false)
     {
         if (!$this->fp)
             return false;
 
         if ($this->_debug) {
-            $this->debug('C: '. rtrim($string));
+            // anonymize the sent command for logging
+            $cut = $endln ? 2 : 0;
+            if ($anonymized && preg_match('/^(A\d+ (?:[A-Z]+ )+)(.+)/', $string, $m)) {
+                $log = $m[1] . sprintf('****** [%d]', strlen($m[2]) - $cut);
+            }
+            else if ($anonymized) {
+                $log = sprintf('****** [%d]', strlen($string) - $cut);
+            }
+            else {
+                $log = rtrim($string);
+            }
+            $this->debug('C: ' . $log);
         }
 
         $res = fwrite($this->fp, $string . ($endln ? "\r\n" : ''));
@@ -116,10 +129,11 @@ class rcube_imap_generic
      *
      * @param string $string Command string
      * @param bool   $endln  True if CRLF need to be added at the end of command
+     * @param bool   $anonymized Don't write the given data to log but a placeholder
      *
      * @return int|bool Number of bytes sent, False on error
      */
-    function putLineC($string, $endln=true)
+    function putLineC($string, $endln=true, $anonymized=false)
     {
         if (!$this->fp) {
             return false;
@@ -138,7 +152,7 @@ class rcube_imap_generic
                         $parts[$i+1] = sprintf("{%d+}\r\n", $matches[1]);
                     }
 
-                    $bytes = $this->putLine($parts[$i].$parts[$i+1], false);
+                    $bytes = $this->putLine($parts[$i].$parts[$i+1], false, $anonymized);
                     if ($bytes === false)
                         return false;
                     $res += $bytes;
@@ -153,7 +167,7 @@ class rcube_imap_generic
                     $i++;
                 }
                 else {
-                    $bytes = $this->putLine($parts[$i], false);
+                    $bytes = $this->putLine($parts[$i], false, $anonymized);
                     if ($bytes === false)
                         return false;
                     $res += $bytes;
@@ -519,7 +533,7 @@ class rcube_imap_generic
                 $reply = base64_encode($user . ' ' . $hash);
 
                 // send result
-                $this->putLine($reply);
+                $this->putLine($reply, true, true);
             }
             else {
                 // RFC2831: DIGEST-MD5
@@ -537,7 +551,7 @@ class rcube_imap_generic
                     base64_decode($challenge), $this->host, 'imap', $user));
 
                 // send result
-                $this->putLine($reply);
+                $this->putLine($reply, true, true);
                 $line = trim($this->readReply());
 
                 if ($line[0] == '+') {
@@ -577,7 +591,7 @@ class rcube_imap_generic
             // RFC 4959 (SASL-IR): save one round trip
             if ($this->getCapability('SASL-IR')) {
                 list($result, $line) = $this->execute("AUTHENTICATE PLAIN", array($reply),
-                    self::COMMAND_LASTLINE | self::COMMAND_CAPABILITY);
+                    self::COMMAND_LASTLINE | self::COMMAND_CAPABILITY | self::COMMAND_ANONYMIZED);
             }
             else {
                 $this->putLine($this->nextTag() . " AUTHENTICATE PLAIN");
@@ -588,7 +602,7 @@ class rcube_imap_generic
                 }
 
                 // send result, get reply and process it
-                $this->putLine($reply);
+                $this->putLine($reply, true, true);
                 $line = $this->readReply();
                 $result = $this->parseResult($line);
             }
@@ -619,7 +633,7 @@ class rcube_imap_generic
     function login($user, $password)
     {
         list($code, $response) = $this->execute('LOGIN', array(
-            $this->escape($user), $this->escape($password)), self::COMMAND_CAPABILITY);
+            $this->escape($user), $this->escape($password)), self::COMMAND_CAPABILITY | self::COMMAND_ANONYMIZED);
 
         // re-set capabilities list if untagged CAPABILITY response provided
         if (preg_match('/\* CAPABILITY (.+)/i', $response, $matches)) {
@@ -1177,13 +1191,20 @@ class rcube_imap_generic
      * Folder creation (CREATE)
      *
      * @param string $mailbox Mailbox name
+     * @param array  $types    Optional folder types (RFC 6154)
      *
      * @return bool True on success, False on error
      */
-    function createFolder($mailbox)
+    function createFolder($mailbox, $types = null)
     {
-        $result = $this->execute('CREATE', array($this->escape($mailbox)),
-            self::COMMAND_NORESPONSE);
+        $args = array($this->escape($mailbox));
+
+        // RFC 6154: CREATE-SPECIAL-USE
+        if (!empty($types) && $this->getCapability('CREATE-SPECIAL-USE')) {
+            $args[] = '(USE (' . implode(' ', $types) . '))';
+        }
+
+        $result = $this->execute('CREATE', $args, self::COMMAND_NORESPONSE);
 
         return ($result == self::ERROR_OK);
     }
@@ -1279,10 +1300,12 @@ class rcube_imap_generic
      * @param string $ref         Reference name
      * @param string $mailbox     Mailbox name
      * @param bool   $subscribed  Enables returning subscribed mailboxes only
-     * @param array  $status_opts List of STATUS options (RFC5819: LIST-STATUS)
-     *                            Possible: MESSAGES, RECENT, UIDNEXT, UIDVALIDITY, UNSEEN
+     * @param array  $status_opts List of STATUS options
+     *                            (RFC5819: LIST-STATUS:  MESSAGES, RECENT, UIDNEXT, UIDVALIDITY, UNSEEN)
+     *                            or RETURN options (RFC5258: LIST_EXTENDED: SUBSCRIBED, CHILDREN)
      * @param array  $select_opts List of selection options (RFC5258: LIST-EXTENDED)
-     *                            Possible: SUBSCRIBED, RECURSIVEMATCH, REMOTE
+     *                            Possible: SUBSCRIBED, RECURSIVEMATCH, REMOTE,
+     *                                      SPECIAL-USE (RFC6154)
      *
      * @return array List of mailboxes or hash of options if $status_ops argument
      *               is non-empty.
@@ -1295,6 +1318,7 @@ class rcube_imap_generic
         }
 
         $args = array();
+        $rets = array();
 
         if (!empty($select_opts) && $this->getCapability('LIST-EXTENDED')) {
             $select_opts = (array) $select_opts;
@@ -1305,11 +1329,21 @@ class rcube_imap_generic
         $args[] = $this->escape($ref);
         $args[] = $this->escape($mailbox);
 
-        if (!empty($status_opts) && $this->getCapability('LIST-STATUS')) {
-            $status_opts = (array) $status_opts;
-            $lstatus = true;
+        if (!empty($status_opts) && $this->getCapability('LIST-EXTENDED')) {
+            $rets = array_intersect($status_opts, array('SUBSCRIBED', 'CHILDREN'));
+        }
 
-            $args[] = 'RETURN (STATUS (' . implode(' ', $status_opts) . '))';
+        if (!empty($status_opts) && $this->getCapability('LIST-STATUS')) {
+            $status_opts = array_intersect($status_opts, array('MESSAGES', 'RECENT', 'UIDNEXT', 'UIDVALIDITY', 'UNSEEN'));
+
+            if (!empty($status_opts)) {
+                $lstatus = true;
+                $rets[] = 'STATUS (' . implode(' ', $status_opts) . ')';
+            }
+        }
+
+        if (!empty($rets)) {
+            $args[] = 'RETURN (' . implode(' ', $rets) . ')';
         }
 
         list($code, $response) = $this->execute($subscribed ? 'LSUB' : 'LIST', $args);
@@ -1555,23 +1589,23 @@ class rcube_imap_generic
      *
      * @param string $mailbox    Mailbox name
      * @param string $field      Field to sort by (ARRIVAL, CC, DATE, FROM, SIZE, SUBJECT, TO)
-     * @param string $add        Searching criteria
+     * @param string $criteria   Searching criteria
      * @param bool   $return_uid Enables UID SORT usage
      * @param string $encoding   Character set
      *
      * @return rcube_result_index Response data
      */
-    function sort($mailbox, $field, $add='', $return_uid=false, $encoding = 'US-ASCII')
+    function sort($mailbox, $field = 'ARRIVAL', $criteria = '', $return_uid = false, $encoding = 'US-ASCII')
     {
-        $field = strtoupper($field);
+        $old_sel   = $this->selected;
+        $supported = array('ARRIVAL', 'CC', 'DATE', 'FROM', 'SIZE', 'SUBJECT', 'TO');
+        $field     = strtoupper($field);
+
         if ($field == 'INTERNALDATE') {
             $field = 'ARRIVAL';
         }
 
-        $fields = array('ARRIVAL' => 1,'CC' => 1,'DATE' => 1,
-            'FROM' => 1, 'SIZE' => 1, 'SUBJECT' => 1, 'TO' => 1);
-
-        if (!$fields[$field]) {
+        if (!in_array($field, $supported)) {
             return new rcube_result_index($mailbox);
         }
 
@@ -1579,18 +1613,21 @@ class rcube_imap_generic
             return new rcube_result_index($mailbox);
         }
 
+        // return empty result when folder is empty and we're just after SELECT
+        if ($old_sel != $mailbox && !$this->data['EXISTS']) {
+            return new rcube_result_index($mailbox, '* SORT');
+        }
+
         // RFC 5957: SORT=DISPLAY
         if (($field == 'FROM' || $field == 'TO') && $this->getCapability('SORT=DISPLAY')) {
             $field = 'DISPLAY' . $field;
         }
 
-        // message IDs
-        if (!empty($add)) {
-            $add = $this->compressMessageSet($add);
-        }
+        $encoding = $encoding ? trim($encoding) : 'US-ASCII';
+        $criteria = $criteria ? 'ALL ' . trim($criteria) : 'ALL';
 
         list($code, $response) = $this->execute($return_uid ? 'UID SORT' : 'SORT',
-            array("($field)", $encoding, !empty($add) ? $add : 'ALL'));
+            array("($field)", $encoding, $criteria));
 
         if ($code != self::ERROR_OK) {
             $response = null;
@@ -1620,7 +1657,7 @@ class rcube_imap_generic
 
         // return empty result when folder is empty and we're just after SELECT
         if ($old_sel != $mailbox && !$this->data['EXISTS']) {
-            return new rcube_result_thread($mailbox);
+            return new rcube_result_thread($mailbox, '* THREAD');
         }
 
         $encoding  = $encoding ? trim($encoding) : 'US-ASCII';
@@ -3419,7 +3456,7 @@ class rcube_imap_generic
         }
 
         // Send command
-        if (!$this->putLineC($query)) {
+        if (!$this->putLineC($query, true, ($options & self::COMMAND_ANONYMIZED))) {
             $this->setError(self::ERROR_COMMAND, "Unable to send command: $query");
             return $noresp ? self::ERROR_COMMAND : array(self::ERROR_COMMAND, '');
         }

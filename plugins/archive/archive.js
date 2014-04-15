@@ -1,6 +1,6 @@
 /**
  * Archive plugin script
- * @version 2.1
+ * @version 2.3
  */
 
 function rcmail_archive(prop)

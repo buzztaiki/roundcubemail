@@ -73,6 +73,10 @@ $config['syslog_id'] = 'roundcube';
 // For possible values see installer or http://php.net/manual/en/function.openlog.php
 $config['syslog_facility'] = LOG_USER;
 
+// Activate this option if logs should be written to per-user directories.
+// Data will only be logged if a directry <log_dir>/<username>/ exists and is writable.
+$config['per_user_logging'] = false;
+
 // Log sent messages to <log_dir>/sendmail or to syslog
 $config['smtp_log'] = true;
 
@@ -230,6 +234,19 @@ $config['smtp_helo_host'] = '';
 // Note: There's a known issue where using ssl connection with
 // timeout > 0 causes connection errors (https://bugs.php.net/bug.php?id=54511)
 $config['smtp_timeout'] = 0;
+
+// SMTP socket context options
+// See http://php.net/manual/en/context.ssl.php
+// The example below enables server certificate validation, and
+// requires 'smtp_timeout' to be non zero.
+// $config['smtp_conn_options'] = array(
+//   'ssl'         => array(
+//     'verify_peer'     => true,
+//     'verify_depth     => 3,
+//     'cafile'          => '/etc/openssl/certs/ca.crt',
+//   ),
+// );
+$config['smtp_conn_options'] = null;
 
 // ----------------------------------
 // LDAP
@@ -544,19 +561,14 @@ $config['sent_mbox'] = 'Sent';
 // NOTE: Use folder names with namespace prefix (INBOX. on Courier-IMAP)
 $config['trash_mbox'] = 'Trash';
 
-// display these folders separately in the mailbox list.
-// these folders will also be displayed with localized names
-// NOTE: Use folder names with namespace prefix (INBOX. on Courier-IMAP)
-$config['default_folders'] = array('INBOX', 'Drafts', 'Sent', 'Junk', 'Trash');
-
-// Disable localization of the default folder names listed above
-$config['show_real_foldernames'] = false;
-
 // automatically create the above listed default folders on first login
 $config['create_default_folders'] = false;
 
 // protect the default folders from renames, deletes, and subscription changes
 $config['protect_default_folders'] = true;
+
+// Disable localization of the default folder names listed above
+$config['show_real_foldernames'] = false;
 
 // if in your system 0 quota means no limit set this option to true 
 $config['quota_zero_as_unlimited'] = false;

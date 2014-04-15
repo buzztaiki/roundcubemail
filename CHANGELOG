@@ -1,6 +1,59 @@
 CHANGELOG Roundcube Webmail
 ===========================
 
+- Drop support for IE6, move IE7/IE8 support to legacy_browser plugin
+- Update to jQuery-2.1.0
+- Search across multiple folders (#1485234)
+- Improve UI integration of ACL settings
+- Drop support for PHP < 5.3.7
+- Apply user-specific replacements to group's base_dn property (#1489779)
+- Set In-Reply-To and References for forwarded messages (#1489593)
+- Removed redundant default_folders config option (#1489737)
+- Implemented IMAP SPECIAL-USE extension support [RFC6154] (#1487830)
+- Fix bug where "With attachment" option in search filter wasn't selected after return from mail view (#1489774)
+- Fix "washing" of unicoded style attributes (#1489777)
+- Fix unintentional redirect from compose page in Webkit browsers (#1489789)
+- Fix messages index cache update under some conditions (e.g. proxy) (#1489756)
+- Fix lack of translation of special folders in some configurations (#1489799)
+- Fix XSS issue in plain text spellchecker (#1489806)
+- Fix invalid page title for some folders (1489804)
+
+RELEASE 1.0.0
+-------------
+- Added toolbar button to move message in message view
+- Fix style of disabled protocol handler link on IE (#1489569)
+- Fix message import dialog when no file is selected (#1489685)
+- Fix opening compose screen in new window after saving as draft (#1489643)
+- Fix directories check in Installer on Windows (#1489576)
+- Fix issue when default_addressbook option is set to integer value (#1489407)
+- Fix Opera > 15 detection (#1489562)
+- Fix security issue in DomainFactory driver of Password plugin
+- Fix invalid X-Draft-Info on forwarded message draft (#1489587)
+- Fix regression in handling of 'attachments' result in message_compose hook (#1489627)
+- Fix issue where msgexport.sh printed the message to STDOUT instead of a file (#1489634)
+- Fix fatal error in database_attachments plugin under some conditions (#1489726)
+
+RELEASE 1.0-rc
+--------------
+- Small CSS fix with message notice boxes in Larry skin (#1489497)
+- Include groups in contacts search on mail compose (#1489082)
+- Add mime-type mapping for .7z files (#1489512)
+- Invoke update scripts with php to circumvent execution restrictions (#1489322)
+- Fix drag & drop message/contact moving on touch device (#1489431)
+- Fix canned responses in HTML mode (#1489536)
+- Check/create default folders on every login not only the first (#1489423)
+- Update to jQuery-1.11.0 and jQuery-UI-1.9.2
+- Support SMTP socket context options via new config option 'smtp_conn_options'
+- Fix compatibility with PHP 5.2 in html.php file (#1489514)
+- Remove expand/collapse with plus/minus keys (on numeric keypad) (#1489513)
+- Fix issue where filesystem path was added to all-attachments (zip) file (#1489507)
+- Fix case-sensitivity of email addresses handling on compose (#1485499)
+- Don't alter Message-ID of a draft when sending (#1489409)
+- Fix issue where deprecated syntax for HTML lists was not handled properly (#1488768)
+- Display different icons when Trash folder is empty or full (#1485775)
+- Remember last position of more headers switch (#1488323)
+- Fix so message flags modified by another client are applied on the list on refresh (#1485186)
+- Fix broken text/* attachments when forwarding/editing a message (#1489426)
 - Improved minified files handling, added css minification (#1486988)
 - Fix handling of X-Forwarded-For header with multiple addresses (#1489481)
 - Fix border issue on folders list in classic skin (#1489473)

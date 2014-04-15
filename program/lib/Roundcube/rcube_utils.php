@@ -622,6 +622,10 @@ class rcube_utils
      */
     public static function parse_host($name, $host = '')
     {
+        if (!is_string($name)) {
+            return $name;
+        }
+
         // %n - host
         $n = preg_replace('/:\d+$/', '', $_SERVER['SERVER_NAME']);
         // %t - host name without first part, e.g. %n=mail.domain.tld, %t=domain.tld
@@ -642,8 +646,7 @@ class rcube_utils
             }
         }
 
-        $name = str_replace(array('%n', '%t', '%d', '%h', '%z', '%s'), array($n, $t, $d, $h, $z, $s[2]), $name);
-        return $name;
+        return str_replace(array('%n', '%t', '%d', '%h', '%z', '%s'), array($n, $t, $d, $h, $z, $s[2]), $name);
     }
 
 
@@ -1042,4 +1045,16 @@ class rcube_utils
         return !in_array($str, array('false', '0', 'no', 'off', 'nein', ''), true);
     }
 
+    /**
+     * OS-dependent absolute path detection
+     */
+    public static function is_absolute_path($path)
+    {
+        if (strtoupper(substr(PHP_OS, 0, 3)) == 'WIN') {
+            return (bool) preg_match('!^[a-z]:[\\\\/]!i', $path);
+        }
+        else {
+            return $path[0] == DIRECTORY_SEPARATOR;
+        }
+    }
 }

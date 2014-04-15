@@ -35,9 +35,15 @@ abstract class rcube_storage
      */
     public $conn;
 
+    /**
+     * List of supported special folder types
+     *
+     * @var array
+     */
+    public static $folder_types = array('drafts', 'sent', 'junk', 'trash');
+
     protected $folder = 'INBOX';
     protected $default_charset = 'ISO-8859-1';
-    protected $default_folders = array('INBOX');
     protected $search_set;
     protected $options = array('auth_type' => 'check');
     protected $page_size = 10;
@@ -163,24 +169,6 @@ abstract class rcube_storage
     public function set_charset($cs)
     {
         $this->default_charset = $cs;
-    }
-
-
-    /**
-     * This list of folders will be listed above all other folders
-     *
-     * @param  array $arr Indexed list of folder names
-     */
-    public function set_default_folders($arr)
-    {
-        if (is_array($arr)) {
-            $this->default_folders = $arr;
-
-            // add inbox if not included
-            if (!in_array('INBOX', $this->default_folders)) {
-                array_unshift($this->default_folders, 'INBOX');
-            }
-        }
     }
 
 
@@ -357,6 +345,18 @@ abstract class rcube_storage
      * @return int     Number of messages
      */
     abstract function count($folder = null, $mode = 'ALL', $force = false, $status = true);
+
+
+    /**
+     * Public method for listing message flags
+     *
+     * @param string $folder  Folder name
+     * @param array  $uids    Message UIDs
+     * @param int    $mod_seq Optional MODSEQ value
+     *
+     * @return array Indexed array with message flags
+     */
+    abstract function list_flags($folder, $uids, $mod_seq = null);
 
 
     /**
@@ -601,7 +601,7 @@ abstract class rcube_storage
     /**
      * Parse message UIDs input
      *
-     * @param mixed  $uids  UIDs array or comma-separated list or '*' or '1:*'
+     * @param mixed $uids UIDs array or comma-separated list or '*' or '1:*'
      *
      * @return array Two elements array with UIDs converted to list and ALL flag
      */
@@ -620,6 +620,9 @@ abstract class rcube_storage
         else {
             if (is_array($uids)) {
                 $uids = join(',', $uids);
+            }
+            else if (strpos($uids, ':')) {
+                $uids = join(',', rcube_imap_generic::uncompressMessageSet($uids));
             }
 
             if (preg_match('/[^0-9,]/', $uids)) {
@@ -843,15 +846,59 @@ abstract class rcube_storage
      */
     public function create_default_folders()
     {
+        $rcube = rcube::get_instance();
+
         // create default folders if they do not exist
-        foreach ($this->default_folders as $folder) {
-            if (!$this->folder_exists($folder)) {
-                $this->create_folder($folder, true);
-            }
-            else if (!$this->folder_exists($folder, true)) {
-                $this->subscribe($folder);
+        foreach (self::$folder_types as $type) {
+            if ($folder = $rcube->config->get($type . '_mbox')) {
+                if (!$this->folder_exists($folder)) {
+                    $this->create_folder($folder, true, $type);
+                }
+                else if (!$this->folder_exists($folder, true)) {
+                    $this->subscribe($folder);
+                }
             }
         }
+    }
+
+
+    /**
+     * Check if specified folder is a special folder
+     */
+    public function is_special_folder($name)
+    {
+        return $name == 'INBOX' || in_array($name, $this->get_special_folders());
+    }
+
+
+    /**
+     * Return configured special folders
+     */
+    public function get_special_folders($forced = false)
+    {
+        // getting config might be expensive, store special folders in memory
+        if (!isset($this->icache['special-folders'])) {
+            $rcube = rcube::get_instance();
+            $this->icache['special-folders'] = array();
+
+            foreach (self::$folder_types as $type) {
+                if ($folder = $rcube->config->get($type . '_mbox')) {
+                    $this->icache['special-folders'][$type] = $folder;
+                }
+            }
+        }
+
+        return $this->icache['special-folders'];
+    }
+
+
+    /**
+     * Set special folder associations stored in backend
+     */
+    public function set_special_folders($specials)
+    {
+        // should be overriden by storage class if backend supports special folders (SPECIAL-USE)
+        unset($this->icache['special-folders']);
     }
 
 

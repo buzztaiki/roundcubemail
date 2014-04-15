@@ -5,7 +5,7 @@
  | program/include/rcmail_output_html.php                                |
  |                                                                       |
  | This file is part of the Roundcube Webmail client                     |
- | Copyright (C) 2006-2012, The Roundcube Dev Team                       |
+ | Copyright (C) 2006-2013, The Roundcube Dev Team                       |
  |                                                                       |
  | Licensed under the GNU General Public License version 3 or            |
  | any later version with exceptions for skins & plugins.                |
@@ -23,7 +23,7 @@
 /**
  * Class to create HTML page output using a skin template
  *
- * @package    Core
+ * @package Webmail
  * @subpackage View
  */
 class rcmail_output_html extends rcmail_output
@@ -83,9 +83,9 @@ class rcmail_output_html extends rcmail_output
         $this->set_env('skin', $skin);
 
         if (!empty($_REQUEST['_extwin']))
-          $this->set_env('extwin', 1);
+            $this->set_env('extwin', 1);
         if ($this->framed || !empty($_REQUEST['_framed']))
-          $this->set_env('framed', 1);
+            $this->set_env('framed', 1);
 
         // add common javascripts
         $this->add_script('var '.self::JS_OBJECT_NAME.' = new rcube_webmail();', 'head_top');
@@ -119,6 +119,7 @@ class rcmail_output_html extends rcmail_output
     public function set_env($name, $value, $addtojs = true)
     {
         $this->env[$name] = $value;
+
         if ($addtojs || isset($this->js_env[$name])) {
             $this->js_env[$name] = $value;
         }
@@ -1215,7 +1216,7 @@ class rcmail_output_html extends rcmail_output
 
         // generate html code for button
         if ($btn_content) {
-            $attrib_str = html::attrib_string($attrib, $link_attrib);
+            $attrib_str = html::attrib_string($attrib, array_merge($link_attrib, array('data-*')));
             $out = sprintf('<a%s>%s</a>', $attrib_str, $btn_content);
         }
 
@@ -1628,6 +1629,12 @@ class rcmail_output_html extends rcmail_output
             $out .= $input_host->show();
         }
 
+        if (rcube_utils::get_boolean($attrib['submit'])) {
+            $submit = new html_inputfield(array('type' => 'submit', 'id' => 'rcmloginsubmit',
+                'class' => 'button mainaction', 'value' => $this->app->gettext('login')));
+            $out .= html::p('formbuttons', $submit->show());
+        }
+
         // surround html output with a form tag
         if (empty($attrib['form'])) {
             $out = $this->form_tag(array('name' => $form_name, 'method' => 'post'), $out);
@@ -1690,9 +1697,9 @@ class rcmail_output_html extends rcmail_output
         // add form tag around text field
         if (empty($attrib['form'])) {
             $out = $this->form_tag(array(
-                'name' => "rcmqsearchform",
+                'name'     => "rcmqsearchform",
                 'onsubmit' => self::JS_OBJECT_NAME . ".command('search'); return false",
-                'style' => "display:inline"),
+                'style'    => "display:inline"),
                 $out);
         }
 

@@ -377,10 +377,11 @@ class rcube_ldap extends rcube_addressbook
                 // replace placeholders in filter settings
                 if (!empty($this->prop['filter']))
                     $this->prop['filter'] = strtr($this->prop['filter'], $replaces);
-                if (!empty($this->prop['groups']['filter']))
-                    $this->prop['groups']['filter'] = strtr($this->prop['groups']['filter'], $replaces);
-                if (!empty($this->prop['groups']['member_filter']))
-                    $this->prop['groups']['member_filter'] = strtr($this->prop['groups']['member_filter'], $replaces);
+
+                foreach (array('base_dn','filter','member_filter') as $k) {
+                    if (!empty($this->prop['groups'][$k]))
+                        $this->prop['groups'][$k] = strtr($this->prop['groups'][$k], $replaces);
+                }
 
                 if (!empty($this->prop['group_filters'])) {
                     foreach ($this->prop['group_filters'] as $i => $gf) {
@@ -554,7 +555,7 @@ class rcube_ldap extends rcube_addressbook
         }
         else {
             $prop    = $this->group_id ? $this->group_data : $this->prop;
-            $base_dn = $this->group_id ? $this->group_base_dn : $this->base_dn;
+            $base_dn = $this->group_id ? $prop['base_dn'] : $this->base_dn;
 
             // use global search filter
             if (!empty($this->filter))
@@ -1409,6 +1410,16 @@ class rcube_ldap extends rcube_addressbook
             $fieldmap['name'] = $this->group_data['name_attr'] ? $this->group_data['name_attr'] : $this->prop['groups']['name_attr'];
         }
 
+        // assign object type from object class mapping
+        if (!empty($this->prop['class_type_map'])) {
+            foreach (array_map('strtolower', (array)$rec['objectclass']) as $objcls) {
+                if (!empty($this->prop['class_type_map'][$objcls])) {
+                    $out['_type'] = $this->prop['class_type_map'][$objcls];
+                    break;
+                }
+            }
+        }
+
         foreach ($fieldmap as $rf => $lf)
         {
             for ($i=0; $i < $rec[$lf]['count']; $i++) {
@@ -1618,11 +1629,12 @@ class rcube_ldap extends rcube_addressbook
         // special case: list groups from 'group_filters' config
         if ($vlv_page === null && !empty($this->prop['group_filters'])) {
             $groups = array();
+            $rcube  = rcube::get_instance();
 
             // list regular groups configuration as special filter
             if (!empty($this->prop['groups']['filter'])) {
                 $id = '__groups__';
-                $groups[$id] = array('ID' => $id, 'name' => rcube_label('groups'), 'virtual' => true) + $this->prop['groups'];
+                $groups[$id] = array('ID' => $id, 'name' => $rcube->gettext('groups'), 'virtual' => true) + $this->prop['groups'];
             }
 
             foreach ($this->prop['group_filters'] as $id => $prop) {

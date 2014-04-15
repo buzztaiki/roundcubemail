@@ -97,6 +97,8 @@ init: function()
     if (this.keyboard)
       rcube_event.add_listener({event:'keydown', object:this, method:'key_press'});
   }
+
+  return this;
 },
 
 
@@ -105,11 +107,11 @@ init: function()
  */
 init_row: function(row)
 {
+  row.uid = this.get_row_uid(row);
+
   // make references in internal array and set event handlers
-  if (row && String(row.id).match(this.id_regexp)) {
-    var self = this,
-      uid = RegExp.$1;
-    row.uid = uid;
+  if (row && row.uid) {
+    var self = this, uid = row.uid;
     this.rows[uid] = {uid:uid, id:row.id, obj:row};
 
     // set eventhandlers to table row
@@ -193,6 +195,12 @@ init_fixed_header: function()
 
     var me = this;
     $(window).resize(function(){ me.resize() });
+    $(window).scroll(function(){
+      var w = $(window);
+      me.fixed_header.css('marginLeft', (-w.scrollLeft()) + 'px');
+      if (!bw.webkit)
+        me.fixed_header.css('marginTop', (-w.scrollTop()) + 'px');
+    });
   }
   else {
     $(this.fixed_header).find('thead').replaceWith(clone);
@@ -219,6 +227,8 @@ resize: function()
     $(this.thead).find('tr td').each(function(index) {
       $(this).css('width', column_widths[index]);
     });
+
+    $(window).scroll();
 },
 
 /**
@@ -289,12 +299,15 @@ insert_row: function(row, before)
     if (row.id) domrow.id = row.id;
     if (row.className) domrow.className = row.className;
     if (row.style) $.extend(domrow.style, row.style);
+    if (row.uid) $(domrow).data('uid', row.uid);
 
-    for (var domcell, col, i=0; row.cols && i < row.cols.length; i++) {
+    for (var e, domcell, col, i=0; row.cols && i < row.cols.length; i++) {
       col = row.cols[i];
       domcell = document.createElement(this.col_tagname());
       if (col.className) domcell.className = col.className;
       if (col.innerHTML) domcell.innerHTML = col.innerHTML;
+      for (e in col.events)
+        domcell['on' + e] = col.events[e];
       domrow.appendChild(domcell);
     }
 
@@ -355,7 +368,7 @@ focus: function(e)
 
   // Un-focus already focused elements (#1487123, #1487316, #1488600, #1488620)
   // It looks that window.focus() does the job for all browsers, but not Firefox (#1489058)
-  $(':focus:not(body)').blur();
+  $('iframe,:focus:not(body)').blur();
   window.focus();
 
   if (e || (e = window.event))
@@ -376,6 +389,20 @@ blur: function()
       $(this.rows[id].obj).removeClass('selected focused').addClass('unfocused');
     }
   }
+},
+
+
+/**
+ * Set/unset the given column as hidden
+ */
+hide_column: function(col, hide)
+{
+  var method = hide ? 'addClass' : 'removeClass';
+
+  if (this.fixed_header)
+    $(this.row_tagname()+' '+this.col_tagname()+'.'+col, this.fixed_header)[method]('hidden');
+
+  $(this.row_tagname()+' '+this.col_tagname()+'.'+col, this.list)[method]('hidden');
 },
 
 
@@ -573,7 +600,7 @@ expand: function(row)
     row.expanded = true;
     depth = row.depth;
     new_row = row.obj.nextSibling;
-    this.update_expando(row.uid, true);
+    this.update_expando(row.id, true);
     this.triggerEvent('expandcollapse', { uid:row.uid, expanded:row.expanded, obj:row.obj });
   }
   else {
@@ -623,7 +650,7 @@ collapse_all: function(row)
     row.expanded = false;
     depth = row.depth;
     new_row = row.obj.nextSibling;
-    this.update_expando(row.uid);
+    this.update_expando(row.id);
     this.triggerEvent('expandcollapse', { uid:row.uid, expanded:row.expanded, obj:row.obj });
 
     // don't collapse sub-root tree in multiexpand mode 
@@ -645,7 +672,7 @@ collapse_all: function(row)
           $(new_row).css('display', 'none');
         if (r.has_children && r.expanded) {
           r.expanded = false;
-          this.update_expando(r.uid, false);
+          this.update_expando(r.id, false);
           this.triggerEvent('expandcollapse', { uid:r.uid, expanded:r.expanded, obj:new_row });
         }
       }
@@ -667,7 +694,7 @@ expand_all: function(row)
     row.expanded = true;
     depth = row.depth;
     new_row = row.obj.nextSibling;
-    this.update_expando(row.uid, true);
+    this.update_expando(row.id, true);
     this.triggerEvent('expandcollapse', { uid:row.uid, expanded:row.expanded, obj:row.obj });
   }
   else {
@@ -684,7 +711,7 @@ expand_all: function(row)
         $(new_row).css('display', '');
         if (r.has_children && !r.expanded) {
           r.expanded = true;
-          this.update_expando(r.uid, true);
+          this.update_expando(r.id, true);
           this.triggerEvent('expandcollapse', { uid:r.uid, expanded:r.expanded, obj:new_row });
         }
       }
@@ -698,13 +725,26 @@ expand_all: function(row)
 },
 
 
-update_expando: function(uid, expanded)
+update_expando: function(id, expanded)
 {
-  var expando = document.getElementById('rcmexpando' + uid);
+  var expando = document.getElementById('rcmexpando' + id);
   if (expando)
     expando.className = expanded ? 'expanded' : 'collapsed';
 },
 
+get_row_uid: function(row)
+{
+  if (row && row.uid)
+    return row.uid;
+
+  var uid;
+  if (row && (uid = $(row).data('uid')))
+    row.uid = uid;
+  else if (row && String(row.id).match(this.id_regexp))
+    row.uid = RegExp.$1;
+
+  return row.uid;
+},
 
 /**
  * get first/next/previous/last rows that are not hidden
@@ -740,11 +780,11 @@ get_prev_row: function()
 get_first_row: function()
 {
   if (this.rowcount) {
-    var i, len, rows = this.tbody.childNodes;
+    var i, len, uid, rows = this.tbody.childNodes;
 
     for (i=0, len=rows.length-1; i<len; i++)
-      if (rows[i].id && String(rows[i].id).match(this.id_regexp) && this.rows[RegExp.$1] != null)
-        return RegExp.$1;
+      if (rows[i].id && (uid = this.get_row_uid(rows[i])))
+        return uid;
   }
 
   return null;
@@ -753,11 +793,11 @@ get_first_row: function()
 get_last_row: function()
 {
   if (this.rowcount) {
-    var i, rows = this.tbody.childNodes;
+    var i, uid, rows = this.tbody.childNodes;
 
     for (i=rows.length-1; i>=0; i--)
-      if (rows[i].id && String(rows[i].id).match(this.id_regexp) && this.rows[RegExp.$1] != null)
-        return RegExp.$1;
+      if (rows[i].id && (uid = this.get_row_uid(rows[i])))
+        return uid;
   }
 
   return null;
@@ -1025,7 +1065,7 @@ invert_selection: function()
 /**
  * Unselect selected row(s)
  */
-clear_selection: function(id)
+clear_selection: function(id, no_event)
 {
   var n, num_select = this.selection.length;
 
@@ -1047,7 +1087,7 @@ clear_selection: function(id)
     this.selection = [];
   }
 
-  if (num_select && !this.selection.length)
+  if (num_select && !this.selection.length && !no_event)
     this.triggerEvent('select');
 },
 
@@ -1063,7 +1103,7 @@ get_selection: function(deep)
   if (deep !== false && res.length) {
     for (var uid, uids, i=0, len=res.length; i<len; i++) {
       uid = res[i];
-      if (this.rows[uid].has_children && !this.rows[uid].expanded) {
+      if (this.rows[uid] && this.rows[uid].has_children && !this.rows[uid].expanded) {
         uids = this.row_children(uid);
         for (var j=0, uids_len=uids.length; j<uids_len; j++) {
           uid = uids[j];
@@ -1100,7 +1140,7 @@ highlight_row: function(id, multiple, norecur)
 
   if (!multiple) {
     if (this.selection.length > 1 || !this.in_selection(id)) {
-      this.clear_selection();
+      this.clear_selection(null, true);
       this.selection[0] = id;
       $(this.rows[id].obj).addClass('selected');
     }
@@ -1148,6 +1188,7 @@ highlight_children: function(id, status)
 key_press: function(e)
 {
   var target = e.target || {};
+
   if (this.focused != true || target.nodeName == 'INPUT' || target.nodeName == 'TEXTAREA' || target.nodeName == 'SELECT')
     return true;
 
@@ -1169,11 +1210,9 @@ key_press: function(e)
 
     case 37: // Left arrow key
     case 39: // Right arrow key
-    case 107: // Plus sign on a numeric keypad
-    case 109: // Minus sign on a numeric keypad
       // Stop propagation
       rcube_event.cancel(e);
-      var ret = this.use_plusminus_key(keyCode, mod_key);
+      var ret = this.use_arrow_key(keyCode, mod_key);
       this.key_pressed = keyCode;
       this.modkey = mod_key;
       this.triggerEvent('keypress');
@@ -1218,55 +1257,49 @@ key_press: function(e)
  */
 use_arrow_key: function(keyCode, mod_key)
 {
-  var new_row;
+  var new_row,
+    selected_row = this.rows[this.last_selected];
+
   // Safari uses the nonstandard keycodes 63232/63233 for up/down, if we're
   // using the keypress event (but not the keydown or keyup event).
   if (keyCode == 40 || keyCode == 63233) // down arrow key pressed
     new_row = this.get_next_row();
   else if (keyCode == 38 || keyCode == 63232) // up arrow key pressed
     new_row = this.get_prev_row();
+  else {
+    if (!selected_row || !selected_row.has_children)
+      return;
+
+    // expand
+    if (keyCode == 39) {
+      if (selected_row.expanded)
+        return;
+
+      if (mod_key == CONTROL_KEY || this.multiexpand)
+        this.expand_all(selected_row);
+      else
+        this.expand(selected_row);
+    }
+    // collapse
+    else {
+      if (!selected_row.expanded)
+        return;
+
+      if (mod_key == CONTROL_KEY || this.multiexpand)
+        this.collapse_all(selected_row);
+      else
+        this.collapse(selected_row);
+    }
+
+    this.update_expando(selected_row.id, selected_row.expanded);
+
+    return false;
+  }
 
   if (new_row) {
     this.select_row(new_row.uid, mod_key, false);
     this.scrollto(new_row.uid);
   }
-
-  return false;
-},
-
-
-/**
- * Special handling method for +/- keys
- */
-use_plusminus_key: function(keyCode, mod_key)
-{
-  var selected_row = this.rows[this.last_selected];
-
-  if (!selected_row || !selected_row.has_children)
-    return;
-
-  // expand
-  if (keyCode == 39 || keyCode == 107) {
-    if (selected_row.expanded)
-      return;
-
-    if (mod_key == CONTROL_KEY || this.multiexpand)
-      this.expand_all(selected_row);
-    else
-      this.expand(selected_row);
-  }
-  // collapse
-  else {
-    if (!selected_row.expanded)
-      return;
-
-    if (mod_key == CONTROL_KEY || this.multiexpand)
-      this.collapse_all(selected_row);
-    else
-      this.collapse(selected_row);
-  }
-
-  this.update_expando(selected_row.uid, selected_row.expanded);
 
   return false;
 },
@@ -1337,12 +1370,9 @@ drag_mouse_move: function(e)
 
     // get selected rows (in display order), don't use this.selection here
     $(this.row_tagname() + '.selected', this.tbody).each(function() {
-      if (!String(this.id).match(self.id_regexp))
-        return;
+      var uid = self.get_row_uid(this), row = self.rows[uid];
 
-      var uid = RegExp.$1, row = self.rows[uid];
-
-      if ($.inArray(uid, selection) > -1)
+      if (!row || $.inArray(uid, selection) > -1)
         return;
 
       selection.push(uid);

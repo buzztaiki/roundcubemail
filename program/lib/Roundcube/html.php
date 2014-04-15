@@ -269,17 +269,26 @@ class html
             return '';
         }
 
-        $allowed_f = array_flip((array)$allowed);
+        $allowed_f  = array_flip((array)$allowed);
         $attrib_arr = array();
+
         foreach ($attrib as $key => $value) {
             // skip size if not numeric
             if ($key == 'size' && !is_numeric($value)) {
                 continue;
             }
 
-            // ignore "internal" or not allowed attributes
-            if ($key == 'nl' || ($allowed && !isset($allowed_f[$key])) || $value === null) {
+            // ignore "internal" or empty attributes
+            if ($key == 'nl' || $value === null) {
                 continue;
+            }
+
+            // ignore not allowed attributes
+            if (!empty($allowed)) {
+                $is_data_attr = @substr_compare($key, 'data-', 0, 5) === 0;
+                if (!isset($allowed_f[$key]) && (!$is_data_attr || !isset($allowed_f['data-*']))) {
+                    continue;
+                }
             }
 
             // skip empty eventhandlers
@@ -677,8 +686,8 @@ class html_table extends html
      */
     public function __construct($attrib = array())
     {
-        $default_attrib = self::$doctype == 'xhtml' ? array('summary' => '', 'border' => 0) : array();
-        $this->attrib = array_merge($attrib, $default_attrib);
+        $default_attrib = self::$doctype == 'xhtml' ? array('summary' => '', 'border' => '0') : array();
+        $this->attrib   = array_merge($attrib, $default_attrib);
 
         if (!empty($attrib['tagname']) && $attrib['tagname'] != 'table') {
           $this->tagname = $attrib['tagname'];
@@ -880,7 +889,7 @@ class html_table extends html
     private function _row_tagname()
     {
         static $row_tagnames = array('table' => 'tr', 'ul' => 'li', '*' => 'div');
-        return $row_tagnames[$this->tagname] ?: $row_tagnames['*'];
+        return $row_tagnames[$this->tagname] ? $row_tagnames[$this->tagname] : $row_tagnames['*'];
     }
 
     /**
@@ -889,7 +898,7 @@ class html_table extends html
     private function _col_tagname()
     {
         static $col_tagnames = array('table' => 'td', '*' => 'span');
-        return $col_tagnames[$this->tagname] ?: $col_tagnames['*'];
+        return $col_tagnames[$this->tagname] ? $col_tagnames[$this->tagname] : $col_tagnames['*'];
     }
 
 }

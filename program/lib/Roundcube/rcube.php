@@ -3,8 +3,8 @@
 /*
  +-----------------------------------------------------------------------+
  | This file is part of the Roundcube Webmail client                     |
- | Copyright (C) 2008-2012, The Roundcube Dev Team                       |
- | Copyright (C) 2011-2012, Kolab Systems AG                             |
+ | Copyright (C) 2008-2014, The Roundcube Dev Team                       |
+ | Copyright (C) 2011-2014, Kolab Systems AG                             |
  |                                                                       |
  | Licensed under the GNU General Public License version 3 or            |
  | any later version with exceptions for skins & plugins.                |
@@ -93,6 +93,13 @@ class rcube
      * @var rcube_plugin_api
      */
     public $plugins;
+
+    /**
+     * Instance of rcube_user class.
+     *
+     * @var rcube_user
+     */
+    public $user;
 
 
     /* private/protected vars */
@@ -348,29 +355,6 @@ class rcube
         // for backward compat. (deprecated, will be removed)
         $this->imap = $this->storage;
 
-        // enable caching of mail data
-        $storage_cache  = $this->config->get("{$driver}_cache");
-        $messages_cache = $this->config->get('messages_cache');
-        // for backward compatybility
-        if ($storage_cache === null && $messages_cache === null && $this->config->get('enable_caching')) {
-            $storage_cache  = 'db';
-            $messages_cache = true;
-        }
-
-        if ($storage_cache) {
-            $this->storage->set_caching($storage_cache);
-        }
-        if ($messages_cache) {
-            $this->storage->set_messages_caching(true);
-        }
-
-        // set pagesize from config
-        $pagesize = $this->config->get('mail_pagesize');
-        if (!$pagesize) {
-            $pagesize = $this->config->get('pagesize', 50);
-        }
-        $this->storage->set_pagesize($pagesize);
-
         // set class options
         $options = array(
             'auth_type'   => $this->config->get("{$driver}_auth_type", 'check'),
@@ -405,22 +389,65 @@ class rcube
 
     /**
      * Set storage parameters.
-     * This must be done AFTER connecting to the server!
      */
     protected function set_storage_prop()
     {
         $storage = $this->get_storage();
 
+        // set pagesize from config
+        $pagesize = $this->config->get('mail_pagesize');
+        if (!$pagesize) {
+            $pagesize = $this->config->get('pagesize', 50);
+        }
+
+        $storage->set_pagesize($pagesize);
         $storage->set_charset($this->config->get('default_charset', RCUBE_CHARSET));
 
-        if ($default_folders = $this->config->get('default_folders')) {
-            $storage->set_default_folders($default_folders);
+        // enable caching of mail data
+        $driver         = $this->config->get('storage_driver', 'imap');
+        $storage_cache  = $this->config->get("{$driver}_cache");
+        $messages_cache = $this->config->get('messages_cache');
+        // for backward compatybility
+        if ($storage_cache === null && $messages_cache === null && $this->config->get('enable_caching')) {
+            $storage_cache  = 'db';
+            $messages_cache = true;
         }
-        if (isset($_SESSION['mbox'])) {
-            $storage->set_folder($_SESSION['mbox']);
+
+        if ($storage_cache) {
+            $storage->set_caching($storage_cache);
         }
-        if (isset($_SESSION['page'])) {
-            $storage->set_page($_SESSION['page']);
+        if ($messages_cache) {
+            $storage->set_messages_caching(true);
+        }
+    }
+
+
+    /**
+     * Set special folders type association.
+     * This must be done AFTER connecting to the server!
+     */
+    protected function set_special_folders()
+    {
+        $storage = $this->get_storage();
+        $folders = $storage->get_special_folders(true);
+        $prefs   = array();
+
+        // check SPECIAL-USE flags on IMAP folders
+        foreach ($folders as $type => $folder) {
+            $idx = $type . '_mbox';
+            if ($folder !== $this->config->get($idx)) {
+                $prefs[$idx] = $folder;
+            }
+        }
+
+        // Some special folders differ, update user preferences
+        if (!empty($prefs) && $this->user) {
+            $this->user->save_prefs($prefs);
+        }
+
+        // create default folders (on login)
+        if ($this->config->get('create_default_folders')) {
+            $storage->create_default_folders();
         }
     }
 
@@ -1114,7 +1141,20 @@ class rcube
         // log_driver == 'file' is assumed here
 
         $line = sprintf("[%s]: %s\n", $date, $line);
-        $log_dir  = self::$instance ? self::$instance->config->get('log_dir') : null;
+        $log_dir = null;
+
+        // per-user logging is activated
+        if (self::$instance && self::$instance->config->get('per_user_logging', false) && self::$instance->get_user_id()) {
+            $log_dir = self::$instance->get_user_log_dir();
+            if (empty($log_dir))
+                return false;
+        }
+        else if (!empty($log['dir'])) {
+            $log_dir = $log['dir'];
+        }
+        else if (self::$instance) {
+            $log_dir = self::$instance->config->get('log_dir');
+        }
 
         if (empty($log_dir)) {
             $log_dir = RCUBE_INSTALL_PATH . 'logs';
@@ -1152,7 +1192,6 @@ class rcube
         // handle PHP exceptions
         if (is_object($arg) && is_a($arg, 'Exception')) {
             $arg = array(
-                'type' => 'php',
                 'code' => $arg->getCode(),
                 'line' => $arg->getLine(),
                 'file' => $arg->getFile(),
@@ -1160,7 +1199,7 @@ class rcube
             );
         }
         else if (is_string($arg)) {
-            $arg = array('message' => $arg, 'type' => 'php');
+            $arg = array('message' => $arg);
         }
 
         if (empty($arg['code'])) {
@@ -1176,7 +1215,7 @@ class rcube
 
         $cli = php_sapi_name() == 'cli';
 
-        if (($log || $terminate) && !$cli && $arg['type'] && $arg['message']) {
+        if (($log || $terminate) && !$cli && $arg['message']) {
             $arg['fatal'] = $terminate;
             self::log_bug($arg);
         }
@@ -1204,7 +1243,7 @@ class rcube
      */
     public static function log_bug($arg_arr)
     {
-        $program = strtoupper($arg_arr['type']);
+        $program = strtoupper(!empty($arg_arr['type']) ? $arg_arr['type'] : 'php');
         $level   = self::get_instance()->config->get('debug_level');
 
         // disable errors for ajax requests, write to log instead (#1487831)
@@ -1290,6 +1329,20 @@ class rcube
         self::write_log($dest, sprintf("%s: %0.4f sec", $label, $diff));
     }
 
+    /**
+     * Setter for system user object
+     *
+     * @param rcube_user Current user instance
+     */
+    public function set_user($user)
+    {
+        if (is_object($user)) {
+            $this->user = $user;
+
+            // overwrite config with user preferences
+            $this->config->set_user_prefs((array)$this->user->get_prefs());
+        }
+    }
 
     /**
      * Getter for logged user ID.
@@ -1353,6 +1406,17 @@ class rcube
         }
     }
 
+    /**
+     * Get the per-user log directory
+     */
+    protected function get_user_log_dir()
+    {
+        $log_dir = $this->config->get('log_dir', RCUBE_INSTALL_PATH . 'logs');
+        $user_name = $this->get_user_name();
+        $user_log_dir = $log_dir . '/' . $user_name;
+
+        return !empty($user_name) && is_writable($user_log_dir) ? $user_log_dir : false;
+    }
 
     /**
      * Getter for logged user language code.

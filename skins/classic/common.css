@@ -55,6 +55,13 @@ a.tab
   text-align: center;
 }
 
+a.disabled
+{
+  color: #999;
+  text-decoration: none;
+  cursor: default;
+}
+
 hr
 {
   height: 1px;
@@ -495,6 +502,7 @@ body.iframe .boxtitle
   border-radius: 3px;
   -moz-border-radius: 3px;
   -webkit-border-radius: 3px;
+  box-shadow: 1px 1px 12px #999;
   -moz-box-shadow: 1px 1px 12px #999;
   -webkit-box-shadow: #999 1px 1px 12px;
 }
@@ -659,6 +667,12 @@ ul.treelist li div.treetoggle
   cursor: pointer;
 }
 
+ul.treelist li ul li div.treetoggle
+{
+  left: 28px !important;
+  left: 4px;
+}
+
 ul.treelist li div.collapsed
 {
   background: url(images/icons/collapsed.png) bottom right no-repeat;
@@ -667,6 +681,68 @@ ul.treelist li div.collapsed
 ul.treelist li div.expanded
 {
   background: url(images/icons/expanded.png) bottom right no-repeat;
+}
+
+
+ul.treelist,
+ul.treelist li ul
+{
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background-color: #FFFFFF;
+}
+
+ul.treelist li ul
+{
+  border-top: 1px solid #EBEBEB;
+}
+
+ul.treelist li
+{
+  display: block;
+  font-size: 11px;
+  border-bottom: 1px solid #EBEBEB;
+  white-space: nowrap;
+}
+
+ul.treelist li a
+{
+  cursor: default;
+  display: block;
+  padding-left: 25px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  height: 16px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+ul.treelist li ul li a
+{
+  padding-left: 45px;
+}
+
+ul.treelist ul ul li a
+{
+  padding-left: 65px;
+}
+
+ul.treelist li ul li:last-child
+{
+  border-bottom: 0;
+}
+
+ul.treelist li.selected > a
+{
+  color: #FFF;
+  font-weight: bold;
+  background-color: #929292;
+}
+
+ul.treelist li.droptarget
+{
+  background-color: #FFFFA6;
 }
 
 
@@ -764,6 +840,7 @@ ul.treelist li div.expanded
   border-radius: 3px;
   -moz-border-radius: 3px;
   -webkit-border-radius: 3px;
+  box-shadow: 1px 1px 12px #999;
   -moz-box-shadow: 1px 1px 12px #999;
   -webkit-box-shadow: #999 1px 1px 12px;
 }
@@ -880,6 +957,10 @@ font.bold
   font-weight: bold;
 }
 
+.formbuttons
+{
+  text-align: center;
+}
 
 /***** onclick menu list *****/
 

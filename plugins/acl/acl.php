@@ -86,7 +86,7 @@ class acl extends rcube_plugin
         $this->load_config();
 
         $search = rcube_utils::get_input_value('_search', rcube_utils::INPUT_GPC, true);
-        $sid    = rcube_utils::get_input_value('_id', rcube_utils::INPUT_GPC);
+        $reqid  = rcube_utils::get_input_value('_reqid', rcube_utils::INPUT_GPC);
         $users  = array();
 
         if ($this->init_ldap()) {
@@ -115,7 +115,7 @@ class acl extends rcube_plugin
 
         sort($users, SORT_LOCALE_STRING);
 
-        $this->rc->output->command('ksearch_query_results', $users, $search, $sid);
+        $this->rc->output->command('ksearch_query_results', $users, $search, $reqid);
         $this->rc->output->send();
     }
 
@@ -150,7 +150,8 @@ class acl extends rcube_plugin
         $this->load_config();
         $this->specials = $this->rc->config->get('acl_specials', $this->specials);
         $this->add_texts('localization/', array('deleteconfirm', 'norights',
-            'nouser', 'deleting', 'saving'));
+            'nouser', 'deleting', 'saving', 'newuser', 'editperms'));
+        $this->rc->output->add_label('save', 'cancel');
         $this->include_script('acl.js');
         $this->rc->output->include_script('list.js');
         $this->include_stylesheet($this->local_skin_path().'/acl.css');
@@ -307,7 +308,7 @@ class acl extends rcube_plugin
                     . $val);
             }
 
-            $out = html::tag('ul', array('id' => 'usertype'), $ul, html::$common_attrib);
+            $out = html::tag('ul', array('id' => 'usertype', 'class' => $attrib['class']), $ul, html::$common_attrib);
         }
         // Display text input alone
         else {
